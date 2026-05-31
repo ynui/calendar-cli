@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::ThemeKind;
 
-const EMBEDDED_CREDENTIALS: &str = include_str!("../credentials.json");
+include!(concat!(env!("OUT_DIR"), "/credentials.rs"));
 
 #[derive(Serialize, Deserialize)]
 pub struct Settings {
@@ -44,7 +44,9 @@ impl Config {
 
         let credentials_path = config_dir.join("credentials.json");
         if !credentials_path.exists() {
-            std::fs::write(&credentials_path, EMBEDDED_CREDENTIALS)?;
+            if let Some(creds) = EMBEDDED_CREDENTIALS {
+                std::fs::write(&credentials_path, creds)?;
+            }
         }
 
         Ok(Config {
