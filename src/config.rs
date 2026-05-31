@@ -25,7 +25,7 @@ impl Default for Settings {
 
 impl Settings {
     pub fn theme_kind(&self) -> ThemeKind {
-        ThemeKind::from_str(&self.theme)
+        self.theme.parse().unwrap_or(ThemeKind::Default)
     }
 }
 

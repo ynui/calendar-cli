@@ -145,11 +145,10 @@ impl GoogleAuth {
 
     pub async fn get_access_token(&mut self) -> Result<String> {
         if let Some(ref token) = self.token {
-            if let Some(expires_at) = token.expires_at {
-                if Utc::now() < expires_at {
+            if let Some(expires_at) = token.expires_at
+                && Utc::now() < expires_at {
                     return Ok(token.access_token.clone());
                 }
-            }
 
             if let Some(ref refresh_token_str) = token.refresh_token {
                 let http_client = reqwest::Client::new();

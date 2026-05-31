@@ -1,13 +1,13 @@
 use chrono::{Datelike, Local, NaiveDate, Weekday};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 use unicode_bidi::BidiInfo;
 
-use crate::app::{App, AuthState, Focus, Mode};
-use crate::models::FormState;
+use crate::app::{char_to_byte, App, AuthState, Focus, Mode, ViewMode};
+use crate::models::{CalendarEvent, FormState};
 
 fn bidi(text: &str) -> String {
     if text.is_empty() {
@@ -26,14 +26,12 @@ pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     let main = Layout::vertical([
-        Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
-    .areas::<3>(area);
-    let [title_bar, content, status_bar] = main;
+    .areas::<2>(area);
+    let [content, status_bar] = main;
 
-    render_menu_bar(frame, title_bar, app);
     let evt_area = render_content(frame, content, app);
     render_status(frame, status_bar, app);
 
@@ -50,8 +48,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         Mode::Creating(form) => render_form(frame, " New Event ", form, app),
         Mode::Editing(form) => render_form(frame, " Edit Event ", form, app),
         Mode::Deleting => render_delete_dialog(frame, app),
+        Mode::ConfirmingQuit => render_confirm_quit(frame, app),
         Mode::Help => render_help(frame, app),
         Mode::Settings => render_settings(frame, app),
+        Mode::JumpToDate(value, cursor) => render_jump_date(frame, value, *cursor, app),
+        Mode::ViewingDetail(event) => render_event_detail(frame, event, app),
+        Mode::ViewingEvents(events, cursor) => render_event_list_popup(frame, events, *cursor, app),
         _ => {}
     }
 
@@ -62,52 +64,12 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
-// ── Menu bar ────────────────────────────────────────────────────
-
-fn render_menu_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let labels = ["File", "Calendar", "Account", "Help"];
-    let mut spans: Vec<Span> = Vec::new();
-
-    for (i, label) in labels.iter().enumerate() {
-        let is_focused = app.focus == Focus::MenuBar && app.menu_bar_focus == i;
-        let style = if is_focused {
-            Style::new()
-                .fg(Color::White)
-                .bg(app.theme.selected_bg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::new().fg(Color::White).bg(app.theme.title_bg)
-        };
-        if i > 0 {
-            spans.push(Span::raw("   "));
-        }
-        let display = if is_focused && app.menu_open {
-            format!(" {} \u{25bc}", label)
-        } else {
-            format!(" {} ", label)
-        };
-        spans.push(Span::styled(display, style));
-    }
-
-    // Current date and time on the right side
-    let now = Local::now();
-    let clock = now.format(" %a %b %d %Y  %H:%M:%S ").to_string();
-    let used: usize = spans.iter().map(|s| s.content.len()).sum();
-    let remaining = area.width as usize;
-    if remaining > used + clock.len() {
-        spans.push(Span::raw(" ".repeat(remaining - used - clock.len())));
-    }
-    spans.push(Span::styled(clock, Style::new().fg(Color::Yellow).bg(app.theme.title_bg)));
-
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::new().bg(app.theme.title_bg)),
-        area,
-    );
-}
-
 // ── Content area ────────────────────────────────────────────────
 
 fn render_content(frame: &mut Frame, area: Rect, app: &App) -> Rect {
+    if app.view_mode == ViewMode::Week {
+        return render_week_view(frame, area, app);
+    }
     let panels = Layout::horizontal([
         Constraint::Length(38),
         Constraint::Min(1),
@@ -123,8 +85,11 @@ fn render_content(frame: &mut Frame, area: Rect, app: &App) -> Rect {
 // ── Status bar ──────────────────────────────────────────────────
 
 fn render_status(frame: &mut Frame, area: Rect, app: &App) {
+    let now = Local::now();
+    let time = now.format(" %a %b %d %Y %H:%M:%S ").to_string();
+
     let text = bidi(&status_text(app));
-    let spans: Vec<Span> = text
+    let mut spans: Vec<Span> = text
         .split("  ")
         .filter(|s| !s.is_empty())
         .enumerate()
@@ -146,6 +111,14 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
+    // Push time to the right
+    let used: usize = spans.iter().map(|s| s.content.len()).sum();
+    let pad = area.width.saturating_sub(used as u16 + time.len() as u16);
+    if pad > 0 {
+        spans.push(Span::raw(" ".repeat(pad as usize)));
+    }
+    spans.push(Span::styled(time, Style::new().fg(Color::Yellow)));
+
     frame.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::new().bg(Color::Black)),
         area,
@@ -157,29 +130,25 @@ fn status_text(app: &App) -> String {
         return app.status.clone();
     }
     if app.search_query.is_some() {
-        return "[Esc] Cancel  [Enter] Jump to event  [Up/Down] Navigate results  Type to search".into();
+        return "[Esc] Cancel  [Enter] Jump  [Up/Down] Navigate  Type to search".into();
     }
     match app.mode {
+        Mode::Normal if app.menu_open => "[Enter] Select  [Esc] Cancel".into(),
         Mode::Normal => {
-            if app.menu_open {
-                return "[Enter] Select  [Esc] Cancel".into();
-            }
-            match app.focus {
-                Focus::MenuBar => {
-                    "[Left/Right] Navigate menus  [Down/Enter] Open  [Tab] Cycle focus".into()
-                }
-                Focus::Calendar => {
-                    "[/] Search  [Arrows] Days  [Enter] Options  [Esc] Quit".into()
-                }
-                Focus::EventList => {
-                    "[Up/Down] Select  [Enter] Options  [Tab] Focus".into()
-                }
+            if app.view_mode == ViewMode::Week {
+                "? for help  [w] Month view".into()
+            } else {
+                "? for help  [w] Week view".into()
             }
         }
+        Mode::JumpToDate(_, _) => "[Enter] Jump  [Esc] Cancel".into(),
         Mode::Creating(_) | Mode::Editing(_) => "[Tab] Next  [Enter] Save  [Esc] Cancel".into(),
         Mode::Deleting => "[Enter] Confirm  [Esc] Cancel".into(),
+        Mode::ConfirmingQuit => "[y] Yes  [n] No  [Enter] Yes  [Esc] No".into(),
         Mode::Help => "[Esc] Close".into(),
         Mode::Settings => "[Enter] Execute  [Esc] Back".into(),
+        Mode::ViewingDetail(_) => "[Esc] Close".into(),
+        Mode::ViewingEvents(_, _) => "[Up/Down] Navigate  [Enter] Details  [Esc] Close".into(),
     }
 }
 
@@ -199,25 +168,6 @@ fn render_calendar(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let mut lines: Vec<Line> = Vec::new();
-
-    // Month header with navigation hints — centered in 35-char grid
-    let left_arrow = Span::styled(" ◄ ", Style::new().fg(Color::DarkGray));
-    let month_str = format!(" {} {} ", first.format("%B"), year);
-    let right_arrow = Span::styled(" ► ", Style::new().fg(Color::DarkGray));
-    let content_width = " ◄ ".len() + month_str.len() + " ► ".len();
-    let padding = if content_width < 35 {
-        ((35 - content_width) as f64 / 2.0).round() as usize
-    } else {
-        0
-    };
-    let header = vec![
-        Span::raw(" ".repeat(padding)),
-        left_arrow,
-        Span::styled(month_str, Style::new().bold().fg(Color::White)),
-        right_arrow,
-    ];
-    lines.push(Line::from(header));
-    lines.push(Line::from(""));
 
     // Day-of-week header — each slot 5 chars (includes trailing space)
     let days: &[&str; 7] = if app.first_day_of_week == 0 {
@@ -241,14 +191,22 @@ fn render_calendar(frame: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(dow_spans));
 
-    // Build weeks
+    // Build weeks — always 6 rows for consistent height
+    let prev_last = month_last_day(year - if month == 1 { 1 } else { 0 }, if month == 1 { 12 } else { month - 1 });
     let mut day: u32 = 1;
-    let mut week: usize = 0;
-    loop {
+    let mut next_day: u32 = 1;
+    let dim = Style::new().fg(Color::DarkGray);
+    for week in 0..6 {
         let mut row_spans = Vec::new();
         for dow in 0..7 {
-            if (week == 0 && dow < start_dow) || day > last.day() {
-                row_spans.push(Span::raw("     "));
+            if week == 0 && dow < start_dow {
+                let pd = prev_last.day() - (start_dow as u32 - 1 - dow as u32);
+                row_spans.push(Span::styled(format!(" {:>2}  ", pd), dim));
+                continue;
+            }
+            if day > last.day() {
+                row_spans.push(Span::styled(format!(" {:>2}  ", next_day), dim));
+                next_day += 1;
                 continue;
             }
 
@@ -267,16 +225,11 @@ fn render_calendar(frame: &mut Frame, area: Rect, app: &App) {
             day += 1;
         }
         lines.push(Line::from(row_spans));
-        week += 1;
-        if day > last.day() {
-            break;
-        }
-        if week > 6 {
-            break;
-        }
     }
 
     let is_focused = matches!(app.focus, Focus::Calendar);
+    let title = format!(" {} {} ", first.format("%B"), year);
+    let title_line = Line::from(Span::styled(title, Style::new().bold().fg(Color::White)));
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -284,7 +237,9 @@ fn render_calendar(frame: &mut Frame, area: Rect, app: &App) {
             Style::new().fg(app.theme.active_border)
         } else {
             Style::new().fg(app.theme.inactive_border)
-        });
+        })
+        .title(title_line)
+        .title_alignment(Alignment::Left);
 
     let paragraph = Paragraph::new(Text::from(lines)).block(block);
     frame.render_widget(paragraph, area);
@@ -496,6 +451,247 @@ fn render_search_bar(frame: &mut Frame, app: &App, content: Rect) {
     );
 }
 
+// ── Jump to Date ────────────────────────────────────────────────
+
+fn render_jump_date(frame: &mut Frame, value: &str, cursor: usize, app: &App) {
+    let area = frame.area();
+    let popup = centered_rect(34, 5, area);
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Jump to Date ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(app.theme.active_border));
+
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let byte_cursor = char_to_byte(value, cursor);
+    let before = &value[..byte_cursor];
+    let after = &value[byte_cursor..];
+
+    let label = Span::styled(" Date: ", app.theme.accent_bold);
+    let cursor_ch = after.chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".into());
+    let after_rest = after.chars().skip(1).collect::<String>();
+
+    let mut spans = vec![label];
+    if !before.is_empty() {
+        spans.push(Span::styled(bidi(before), Style::new().bg(Color::DarkGray).fg(Color::White)));
+    }
+    spans.push(Span::styled(cursor_ch, Style::new().bg(app.theme.active_border).fg(Color::Black)));
+    if !after_rest.is_empty() {
+        spans.push(Span::styled(bidi(&after_rest), Style::new().bg(Color::DarkGray).fg(Color::White)));
+    }
+    spans.push(Span::styled(
+        "  (e.g. 2026-05-31, May 31, tomorrow, +3)",
+        Style::new().fg(Color::DarkGray),
+    ));
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), inner);
+}
+
+// ── Event Detail popup ──────────────────────────────────────────
+
+fn render_event_detail(frame: &mut Frame, event: &CalendarEvent, app: &App) {
+    let area = frame.area();
+    let popup = centered_rect(60, 12, area);
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Event Details ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(app.theme.active_border));
+
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled(" Title: ", Style::new().bold().fg(Color::Cyan)),
+        Span::raw(bidi(&event.summary)),
+    ]));
+    if let Some(start) = event.start {
+        let end_str = event.end.map(|e| e.format(" %H:%M").to_string()).unwrap_or_default();
+        let time_str = bidi(&format!("{} —{}", start.format("%a %b %d, %H:%M"), end_str));
+        lines.push(Line::from(vec![
+            Span::styled(" Time:  ", Style::new().bold().fg(Color::Cyan)),
+            Span::raw(time_str),
+        ]));
+    }
+    if let Some(ref desc) = event.description
+        && !desc.is_empty() {
+            lines.push(Line::from(Span::styled(" Description: ", Style::new().bold().fg(Color::Cyan))));
+            for line in desc.lines() {
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::raw(bidi(line)),
+                ]));
+            }
+        }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(" [Esc] Close", Style::new().fg(Color::DarkGray))));
+
+    let paragraph = Paragraph::new(Text::from(lines));
+    frame.render_widget(paragraph, inner);
+}
+
+// ── Event list popup (for week view) ────────────────────────────
+
+fn render_event_list_popup(frame: &mut Frame, events: &[CalendarEvent], cursor: usize, app: &App) {
+    let area = frame.area();
+    let height = (events.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let popup = centered_rect(50, height, area);
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Events ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(app.theme.active_border));
+
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let items: Vec<ListItem> = events
+        .iter()
+        .enumerate()
+        .map(|(i, event)| {
+            let is_selected = i == cursor;
+            let time = event.start.map(|s| s.format(" %H:%M").to_string()).unwrap_or_default();
+            let title = bidi(&event.summary);
+            let label = format!("{}{}", time, title);
+            let style = if is_selected {
+                Style::new()
+                    .bg(app.theme.selected_bg)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(Color::White)
+            };
+            ListItem::new(label).style(style)
+        })
+        .collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, inner);
+}
+
+
+fn week_start(date: NaiveDate, first_day_of_week: u8) -> NaiveDate {
+    let dow = if first_day_of_week == 0 {
+        date.weekday().num_days_from_monday()
+    } else {
+        date.weekday().num_days_from_sunday()
+    };
+    date - chrono::Duration::days(dow as i64)
+}
+
+fn render_week_view(frame: &mut Frame, area: Rect, app: &App) -> Rect {
+    let start = week_start(app.selected_date, app.first_day_of_week);
+
+    let title = format!(" Week of {} ", start.format("%a, %b %d, %Y"));
+    let is_focused = matches!(app.focus, Focus::Calendar);
+
+    let block = Block::default()
+        .title(Span::styled(title, Style::new().bold().fg(Color::White)))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(if is_focused {
+            Style::new().fg(app.theme.active_border)
+        } else {
+            Style::new().fg(app.theme.inactive_border)
+        })
+        .title_alignment(Alignment::Left);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // 7 equal columns for the days
+    let cols = Layout::horizontal([Constraint::Ratio(1, 7); 7]).areas::<7>(inner);
+
+    let today = Local::now().naive_local().date();
+    for (i, col) in cols.iter().enumerate() {
+        let date = start + chrono::Duration::days(i as i64);
+        let is_selected = date == app.selected_date;
+        let is_today = date == today;
+
+        let day_events: Vec<&CalendarEvent> = app.month_events
+            .iter()
+            .filter(|e| e.start.is_some_and(|s| s.date() == date))
+            .collect();
+
+        render_week_day(frame, *col, date, &day_events, is_selected, is_today, app);
+    }
+
+    inner
+}
+
+fn render_week_day(
+    frame: &mut Frame,
+    area: Rect,
+    date: NaiveDate,
+    events: &[&CalendarEvent],
+    is_selected: bool,
+    is_today: bool,
+    app: &App,
+) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Day header — two lines
+    let day_name = bidi(&date.format("%a").to_string());
+    let day_num = date.format("%d").to_string();
+    let header_style = if is_today {
+        Style::new().bold().fg(Color::Yellow)
+    } else if is_selected {
+        Style::new().bold().fg(Color::White)
+    } else {
+        Style::new().fg(Color::Gray)
+    };
+    lines.push(Line::from(Span::styled(day_name, header_style)));
+    lines.push(Line::from(Span::styled(day_num, header_style)));
+    lines.push(Line::from(Span::styled(
+        "─".repeat(area.width.saturating_sub(1) as usize),
+        Style::new().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+
+    // Events for the day
+    if events.is_empty() {
+        lines.push(Line::from(Span::styled(
+            if area.width > 10 { "·" } else { "" },
+            Style::new().fg(Color::DarkGray),
+        )));
+    } else {
+        for event in events.iter().take(4) {
+            let time = event.start.map(|s| s.format(" %H:%M").to_string()).unwrap_or_default();
+            let title = bidi(&event.summary);
+            let label = format!("{}{}", time, title);
+            let truncated: String = label
+                .chars()
+                .take(area.width.saturating_sub(2) as usize)
+                .collect();
+            lines.push(Line::from(Span::raw(truncated)));
+        }
+        if events.len() > 4 {
+            lines.push(Line::from(Span::styled(
+                format!("+{} more", events.len() - 4),
+                Style::new().fg(Color::DarkGray),
+            )));
+        }
+    }
+
+    let bg = if is_selected { app.theme.selected_bg } else { Color::Black };
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::new().bg(bg)),
+        area,
+    );
+}
+
 // ── Form popup ──────────────────────────────────────────────────
 
 fn render_form(frame: &mut Frame, title: &str, form: &FormState, app: &App) {
@@ -528,8 +724,9 @@ fn render_form(frame: &mut Frame, title: &str, form: &FormState, app: &App) {
         );
 
         let value_line = if is_focused {
-            let before = &field.value[..field.cursor];
-            let after = &field.value[field.cursor..];
+            let byte_cursor = char_to_byte(&field.value, field.cursor);
+            let before = &field.value[..byte_cursor];
+            let after = &field.value[byte_cursor..];
             let mut spans = vec![label];
             if !before.is_empty() {
                 spans.push(Span::styled(
@@ -542,9 +739,10 @@ fn render_form(frame: &mut Frame, title: &str, form: &FormState, app: &App) {
                 cursor_ch,
                 Style::new().bg(app.theme.active_border).fg(Color::Black),
             ));
-            if after.len() > 1 {
+            let after_rest = after.chars().skip(1).collect::<String>();
+            if !after_rest.is_empty() {
                 spans.push(Span::styled(
-                    bidi(&after[1..]),
+                    bidi(&after_rest),
                     Style::new().bg(Color::DarkGray).fg(Color::White),
                 ));
             }
@@ -591,13 +789,49 @@ fn render_delete_dialog(frame: &mut Frame, app: &App) {
     let name = app.selected_event().map(|e| e.summary.as_str()).unwrap_or("this event");
     let lines = vec![
         Line::from(Span::styled(
-            format!(" Delete \"{}\"?", name),
+            format!(" Delete \"{}\"?", bidi(name)),
             Style::new().fg(Color::LightRed).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
             Span::styled("  [Enter] Confirm  ", Style::new().fg(Color::Green)),
             Span::styled("[Esc] Cancel", Style::new().fg(Color::Gray)),
+        ]),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::new().bg(Color::Black)),
+        inner,
+    );
+}
+
+fn render_confirm_quit(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+    let popup = centered_rect(30, 5, area);
+
+    frame.render_widget(Clear, popup);
+
+    let inner = popup.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(app.theme.active_border)
+        .title(" Quit ");
+
+    frame.render_widget(block, popup);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            " Really quit? ",
+            Style::new().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  [y] Yes  ", Style::new().fg(Color::Green)),
+            Span::styled("[n] No", Style::new().fg(Color::Gray)),
         ]),
     ];
 
@@ -628,16 +862,17 @@ fn render_help(frame: &mut Frame, app: &App) {
         Line::from(Span::styled("  Navigation", Style::new().bold().fg(Color::Cyan))),
         Line::from(Span::raw("  Arrows    Move between days / menu items")),
         Line::from(Span::raw("  [/]       Previous / Next month")),
-        Line::from(Span::raw("  /         Search events by title / description")),
-        Line::from(Span::raw("  Tab       Cycle focus: Menu Bar / Calendar / Events")),
-        Line::from(Span::raw("  Enter     Open menu / context menu")),
-        Line::from(Span::raw("  Esc       Close menu / Quit")),
+        Line::from(Span::raw("  w         Toggle Week / Month view")),
+        Line::from(Span::raw("  Tab       Cycle Calendar / Events")),
+        Line::from(Span::raw("  Enter     Context menu")),
+        Line::from(Span::raw("  Esc       Quit / Close")),
         Line::from(Span::raw("")),
-        Line::from(Span::styled("  Menu Bar", Style::new().bold().fg(Color::Cyan))),
-        Line::from(Span::raw("  File      Settings, Quit")),
-        Line::from(Span::raw("  Calendar  Go to Today, New Event")),
-        Line::from(Span::raw("  Account   Sign in/out of Google")),
-        Line::from(Span::raw("  Help      This screen")),
+        Line::from(Span::styled("  Actions", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::raw("  e     Edit event        d   Delete event")),
+        Line::from(Span::raw("  ?     Help              s   Settings")),
+        Line::from(Span::raw("  t     Go to Today       j   Jump to Date")),
+        Line::from(Span::raw("  n     New Event         /   Search")),
+        Line::from(Span::raw("  q     Quit")),
     ]);
 
     frame.render_widget(
@@ -657,23 +892,14 @@ fn render_menu_dropdown(frame: &mut Frame, app: &App) {
         .map(|i| i.label.len())
         .max()
         .unwrap_or(10);
-    let width = (max_len + 4) as u16;
+    let width = (max_len + 4).max(12) as u16;
     let height = app.menu_items.len() as u16 + 2;
 
-    // Position below the menu bar, aligned with the selected menu
-    let menu_x: u16 = match app.menu_bar_focus {
-        0 => 1,
-        1 => 8,
-        2 => 20,
-        3 => 31,
-        _ => 1,
-    };
-
     let dropdown_area = Rect::new(
-        menu_x.min(area.width.saturating_sub(width)),
-        1,
+        area.width.saturating_sub(width) / 2,
+        area.height.saturating_sub(height) / 2,
         width.min(area.width),
-        height.min(area.height.saturating_sub(1)),
+        height.min(area.height),
     );
 
     frame.render_widget(Clear, dropdown_area);

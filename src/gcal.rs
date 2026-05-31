@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{Local, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde::Deserialize;
 
 use crate::auth::GoogleAuth;
@@ -109,14 +109,22 @@ impl CalendarBackend for GoogleCalendar {
     ) -> Result<CalendarEvent> {
         let token = self.auth.get_access_token().await?;
 
+        let local_to_utc = |ndt: NaiveDateTime| -> DateTime<Utc> {
+            Local
+                .from_local_datetime(&ndt)
+                .earliest()
+                .expect("invalid local time due to DST transition")
+                .to_utc()
+        };
+
         let mut body = serde_json::json!({
             "summary": summary,
             "start": {
-                "dateTime": start.and_utc().to_rfc3339(),
+                "dateTime": local_to_utc(start).to_rfc3339(),
                 "timeZone": "UTC",
             },
             "end": {
-                "dateTime": end.and_utc().to_rfc3339(),
+                "dateTime": local_to_utc(end).to_rfc3339(),
                 "timeZone": "UTC",
             },
         });
@@ -153,14 +161,22 @@ impl CalendarBackend for GoogleCalendar {
     ) -> Result<()> {
         let token = self.auth.get_access_token().await?;
 
+        let local_to_utc = |ndt: NaiveDateTime| -> DateTime<Utc> {
+            Local
+                .from_local_datetime(&ndt)
+                .earliest()
+                .expect("invalid local time due to DST transition")
+                .to_utc()
+        };
+
         let mut body = serde_json::json!({
             "summary": summary,
             "start": {
-                "dateTime": start.and_utc().to_rfc3339(),
+                "dateTime": local_to_utc(start).to_rfc3339(),
                 "timeZone": "UTC",
             },
             "end": {
-                "dateTime": end.and_utc().to_rfc3339(),
+                "dateTime": local_to_utc(end).to_rfc3339(),
                 "timeZone": "UTC",
             },
         });

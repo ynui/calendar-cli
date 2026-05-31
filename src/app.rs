@@ -1,7 +1,8 @@
-use std::path::PathBuf;
-use std::time::Duration;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime};
@@ -36,13 +37,22 @@ pub enum Mode {
     Creating(FormState),
     Editing(FormState),
     Deleting,
+    ConfirmingQuit,
     Help,
     Settings,
+    JumpToDate(String, usize),
+    ViewingDetail(CalendarEvent),
+    ViewingEvents(Vec<CalendarEvent>, usize),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum ViewMode {
+    Month,
+    Week,
 }
 
 #[derive(PartialEq)]
 pub enum Focus {
-    MenuBar,
     Calendar,
     EventList,
 }
@@ -55,6 +65,7 @@ pub struct ContextItem {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum MenuAction {
     Quit,
     Settings,
@@ -63,6 +74,7 @@ pub enum MenuAction {
     EditEvent,
     DeleteEvent,
     ViewDetail,
+    FocusEvents,
     Search,
     SignIn,
     SignOut,
@@ -85,7 +97,6 @@ pub struct Theme {
     pub weekend: Color,
     pub help_key: Style,
     pub dim: Style,
-    pub title_bg: Color,
     pub accent_bold: Style,
 }
 
@@ -97,12 +108,16 @@ impl ThemeKind {
             ThemeKind::Ocean => "ocean",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Self {
+impl FromStr for ThemeKind {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "light" => ThemeKind::Light,
-            "ocean" => ThemeKind::Ocean,
-            _ => ThemeKind::Default,
+            "light" => Ok(ThemeKind::Light),
+            "ocean" => Ok(ThemeKind::Ocean),
+            _ => Ok(ThemeKind::Default),
         }
     }
 }
@@ -118,7 +133,6 @@ impl Theme {
                 weekend: Color::Gray,
                 help_key: Style::new().fg(Color::Cyan),
                 dim: Style::new().fg(Color::DarkGray),
-                title_bg: Color::DarkGray,
                 accent_bold: Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             },
             ThemeKind::Light => Self {
@@ -129,7 +143,6 @@ impl Theme {
                 weekend: Color::Gray,
                 help_key: Style::new().fg(Color::Black),
                 dim: Style::new().fg(Color::Gray),
-                title_bg: Color::White,
                 accent_bold: Style::new().fg(Color::Black).add_modifier(Modifier::BOLD),
             },
             ThemeKind::Ocean => Self {
@@ -140,7 +153,6 @@ impl Theme {
                 weekend: Color::DarkGray,
                 help_key: Style::new().fg(Color::LightCyan),
                 dim: Style::new().fg(Color::DarkGray),
-                title_bg: Color::Rgb(20, 30, 50),
                 accent_bold: Style::new().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
             },
         }
@@ -179,11 +191,11 @@ pub struct App {
     pub auth_state: AuthState,
     pub settings_focus: usize,
     pub first_day_of_week: u8,
-    pub menu_bar_focus: usize,
     pub menu_open: bool,
     pub menu_items: Vec<ContextItem>,
     pub menu_cursor: usize,
     pub search_query: Option<String>,
+    pub view_mode: ViewMode,
     pub theme_kind: ThemeKind,
     pub theme: Theme,
 }
@@ -215,11 +227,11 @@ impl App {
             auth_state: AuthState::Idle,
             settings_focus: 0,
             first_day_of_week: settings.first_day_of_week,
-            menu_bar_focus: 0,
             menu_open: false,
             menu_items: Vec::new(),
             menu_cursor: 0,
             search_query: None,
+            view_mode: ViewMode::Month,
             theme_kind,
             theme,
         }
@@ -232,14 +244,9 @@ impl App {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
 
         std::thread::spawn(move || {
-            loop {
-                match crossterm::event::read() {
-                    Ok(event) => {
-                        if event_tx.send(event).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
+            while let Ok(event) = crossterm::event::read() {
+                if event_tx.send(event).is_err() {
+                    break;
                 }
             }
         });
@@ -317,9 +324,101 @@ impl App {
                 }
                 _ => Ok(Action::None),
             },
+            Mode::ConfirmingQuit => match key.code {
+                KeyCode::Enter | KeyCode::Char('y') => Ok(Action::Quit),
+                KeyCode::Esc | KeyCode::Char('n') => {
+                    self.mode = Mode::Normal;
+                    Ok(Action::None)
+                }
+                _ => Ok(Action::None),
+            },
             Mode::Help => {
                 if matches!(key.code, KeyCode::Esc) {
                     self.mode = Mode::Normal;
+                }
+                Ok(Action::None)
+            }
+            Mode::JumpToDate(value, cursor) => {
+                match key.code {
+                    KeyCode::Enter => {
+                        let query = value.clone();
+                        self.mode = Mode::Normal;
+                        if let Some(date) = parse_date(&query) {
+                            let clamped = date
+                                .day()
+                                .min(num_days_in_month(date.year(), date.month()));
+                            let date = NaiveDate::from_ymd_opt(date.year(), date.month(), clamped).unwrap_or(date);
+                            self.selected_date = date;
+                            self.view_date = NaiveDate::from_ymd_opt(date.year(), date.month(), 1).unwrap();
+                            self.filter_events_for_date(date);
+                            self.needs_refresh = true;
+                        } else {
+                            self.status = format!("Invalid date: {query}");
+                        }
+                    }
+                    KeyCode::Esc => {
+                        self.mode = Mode::Normal;
+                    }
+                    KeyCode::Left => {
+                        *cursor = cursor.saturating_sub(1);
+                    }
+                    KeyCode::Right => {
+                        let nc = num_chars(value);
+                        if *cursor < nc {
+                            *cursor += 1;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if *cursor > 0 {
+                            let byte_pos = char_to_byte(value, *cursor - 1);
+                            let c = value[byte_pos..].chars().next().unwrap();
+                            value.drain(byte_pos..byte_pos + c.len_utf8());
+                            *cursor -= 1;
+                        }
+                    }
+                    KeyCode::Delete => {
+                        let nc = num_chars(value);
+                        if *cursor < nc {
+                            let byte_pos = char_to_byte(value, *cursor);
+                            let c = value[byte_pos..].chars().next().unwrap();
+                            value.drain(byte_pos..byte_pos + c.len_utf8());
+                        }
+                    }
+                    KeyCode::Home => *cursor = 0,
+                    KeyCode::End => *cursor = num_chars(value),
+                    KeyCode::Char(c) if !c.is_control() => {
+                        let byte_pos = char_to_byte(value, *cursor);
+                        value.insert(byte_pos, c);
+                        *cursor += 1;
+                    }
+                    _ => {}
+                }
+                Ok(Action::None)
+            }
+            Mode::ViewingDetail(_) => {
+                if is_cancel(key) {
+                    self.mode = Mode::Normal;
+                }
+                Ok(Action::None)
+            }
+            Mode::ViewingEvents(events, cursor) => {
+                match key.code {
+                    KeyCode::Esc => self.mode = Mode::Normal,
+                    KeyCode::Up => {
+                        if !events.is_empty() {
+                            *cursor = cursor.saturating_sub(1);
+                        }
+                    }
+                    KeyCode::Down => {
+                        if !events.is_empty() {
+                            *cursor = (*cursor + 1).min(events.len() - 1);
+                        }
+                    }
+                    KeyCode::Enter
+                        if *cursor < events.len() => {
+                            self.mode = Mode::ViewingDetail(events[*cursor].clone());
+                        }
+                    _ => {}
                 }
                 Ok(Action::None)
             }
@@ -417,24 +516,64 @@ impl App {
             // Tab cycles focus
             KeyCode::Tab => {
                 self.focus = match self.focus {
-                    Focus::MenuBar => Focus::Calendar,
                     Focus::Calendar => Focus::EventList,
-                    Focus::EventList => Focus::MenuBar,
+                    Focus::EventList => Focus::Calendar,
                 };
             }
             KeyCode::BackTab => {
                 self.focus = match self.focus {
-                    Focus::MenuBar => Focus::EventList,
-                    Focus::Calendar => Focus::MenuBar,
+                    Focus::Calendar => Focus::EventList,
                     Focus::EventList => Focus::Calendar,
                 };
             }
-            KeyCode::Esc => return Ok(Action::Quit),
+            KeyCode::Esc => {
+                self.mode = Mode::ConfirmingQuit;
+            }
+
+            // Global keybinds
+            KeyCode::Char('?') => {
+                self.mode = Mode::Help;
+            }
+            KeyCode::Char('s') => {
+                self.settings_focus = 0;
+                self.mode = Mode::Settings;
+            }
+            KeyCode::Char('t') => {
+                return self.execute_menu_action(MenuAction::Today).await;
+            }
+            KeyCode::Char('n') => {
+                let _ = self.execute_menu_action(MenuAction::NewEvent).await;
+            }
+            KeyCode::Char('e') => {
+                if !self.events.is_empty() {
+                    let _ = self.execute_menu_action(MenuAction::EditEvent).await;
+                }
+            }
+            KeyCode::Char('d') => {
+                if !self.events.is_empty() {
+                    let _ = self.execute_menu_action(MenuAction::DeleteEvent).await;
+                }
+            }
+            KeyCode::Char('q') => {
+                self.mode = Mode::ConfirmingQuit;
+            }
+            KeyCode::Char('j') => {
+                self.mode = Mode::JumpToDate(self.selected_date.format("%Y-%m-%d").to_string(), 0);
+            }
+            KeyCode::Char('w') => {
+                self.view_mode = match self.view_mode {
+                    ViewMode::Month => ViewMode::Week,
+                    ViewMode::Week => ViewMode::Month,
+                };
+            }
 
             _ => match self.focus {
-                Focus::MenuBar => self.handle_bar_key(key),
-                Focus::Calendar => self.handle_calendar_key(key).await?,
-                Focus::EventList => self.handle_eventlist_key(key)?,
+                Focus::Calendar => {
+                    self.handle_calendar_key(key).await?;
+                }
+                Focus::EventList => {
+                    self.handle_eventlist_key(key)?;
+                }
             },
         }
         Ok(Action::None)
@@ -493,29 +632,6 @@ impl App {
         Ok(Action::None)
     }
 
-    fn handle_bar_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Left => {
-                self.menu_bar_focus = self.menu_bar_focus.saturating_sub(1);
-            }
-            KeyCode::Right => {
-                self.menu_bar_focus = (self.menu_bar_focus + 1).min(3);
-            }
-            KeyCode::Down | KeyCode::Enter => {
-                self.open_menu_for_bar();
-            }
-            _ => {}
-        }
-    }
-
-    fn open_menu_for_bar(&mut self) {
-        self.menu_items = self.bar_menu_items();
-        if !self.menu_items.is_empty() && self.menu_items.iter().any(|i| i.enabled) {
-            self.menu_cursor = self.menu_items.iter().position(|i| i.enabled).unwrap_or(0);
-            self.menu_open = true;
-        }
-    }
-
     async fn handle_calendar_key(&mut self, key: KeyEvent) -> Result<()> {
         macro_rules! mv {
             ($days:expr) => {{
@@ -561,11 +677,21 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if !self.events.is_empty() {
-                    self.menu_items = self.event_context_items();
-                    self.menu_cursor = 0;
-                    self.menu_open = true;
-                }
+                self.menu_items = if self.events.is_empty() {
+                    vec![
+                        ContextItem { label: "New Event".into(), action: MenuAction::NewEvent, enabled: true },
+                    ]
+                } else {
+                    let mut items = Vec::new();
+                    if self.view_mode == ViewMode::Month {
+                        items.push(ContextItem { label: "View Events".into(), action: MenuAction::FocusEvents, enabled: true });
+                    }
+                    items.push(ContextItem { label: "New Event".into(), action: MenuAction::NewEvent, enabled: true });
+                    items.extend(self.event_context_items());
+                    items
+                };
+                self.menu_cursor = 0;
+                self.menu_open = true;
             }
             _ => {}
         }
@@ -601,37 +727,12 @@ impl App {
         Ok(Action::None)
     }
 
-    fn bar_menu_items(&self) -> Vec<ContextItem> {
-        match self.menu_bar_focus {
-            0 => vec![
-                ContextItem { label: "Settings".into(), action: MenuAction::Settings, enabled: true },
-                ContextItem { label: "Quit".into(), action: MenuAction::Quit, enabled: true },
-            ],
-            1 => vec![
-                ContextItem { label: "Go to Today".into(), action: MenuAction::Today, enabled: true },
-                ContextItem { label: "New Event".into(), action: MenuAction::NewEvent, enabled: true },
-                ContextItem { label: "Search Events".into(), action: MenuAction::Search, enabled: true },
-            ],
-            2 => {
-                if self.config_token_path.exists() {
-                    vec![ContextItem { label: "Sign Out of Google".into(), action: MenuAction::SignOut, enabled: true }]
-                } else if self.config_credentials_path.exists() {
-                    vec![ContextItem { label: "Sign In to Google".into(), action: MenuAction::SignIn, enabled: true }]
-                } else {
-                    vec![ContextItem { label: "No credentials available".into(), action: MenuAction::None, enabled: false }]
-                }
-            }
-            3 => vec![
-                ContextItem { label: "About / Keybindings".into(), action: MenuAction::Help, enabled: true },
-            ],
-            _ => vec![],
-        }
-    }
-
     fn date_context_items(&self) -> Vec<ContextItem> {
-        let mut items = vec![
-            ContextItem { label: "New Event".into(), action: MenuAction::NewEvent, enabled: true },
-        ];
+        let mut items = Vec::new();
+        if !self.events.is_empty() {
+            items.push(ContextItem { label: "View Events".into(), action: MenuAction::FocusEvents, enabled: true });
+        }
+        items.push(ContextItem { label: "New Event".into(), action: MenuAction::NewEvent, enabled: true });
         if self.selected_date != Local::now().naive_local().date() {
             items.push(ContextItem { label: "Go to Today".into(), action: MenuAction::Today, enabled: true });
         }
@@ -678,19 +779,17 @@ impl App {
                     self.mode = Mode::Deleting;
                 }
             }
+            MenuAction::FocusEvents => {
+                if self.view_mode == ViewMode::Week {
+                    self.mode = Mode::ViewingEvents(self.events.clone(), 0);
+                } else {
+                    self.focus = Focus::EventList;
+                    self.event_focus = 0;
+                }
+            }
             MenuAction::ViewDetail => {
                 if let Some(event) = self.selected_event() {
-                    let time = event
-                        .start
-                        .map(|t| t.format("%H:%M").to_string())
-                        .unwrap_or_default();
-                    let desc = event
-                        .description
-                        .as_deref()
-                        .filter(|s| !s.is_empty())
-                        .map(|s| format!(" — {}", s))
-                        .unwrap_or_default();
-                    self.status = format!("{} — {}{}", event.summary, time, desc);
+                    self.mode = Mode::ViewingDetail(event.clone());
                 }
             }
             MenuAction::SignIn => {
@@ -830,7 +929,7 @@ impl App {
         Ok(())
     }
 
-    pub fn do_sign_out_google(&mut self) {
+    fn do_sign_out_google(&mut self) {
         let _ = std::fs::remove_file(&self.config_token_path);
         self.backend = Box::new(LocalCalendar::new(self.config_events_path.clone()));
     }
@@ -848,20 +947,18 @@ impl App {
     pub fn is_cal_registered() -> bool {
         // Check ~/.local/bin first
         let path = Self::cal_wrapper_path();
-        if std::fs::read_to_string(&path).ok().map_or(false, |s| s.contains("calendar-cli")) {
+        if std::fs::read_to_string(&path).ok().is_some_and(|s| s.contains("calendar-cli")) {
             return true;
         }
         // Also check PATH dirs
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
                 let candidate = dir.join("cal");
-                if candidate.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&candidate) {
-                        if content.contains("calendar-cli") {
+                if candidate.exists()
+                    && let Ok(content) = std::fs::read_to_string(&candidate)
+                        && content.contains("calendar-cli") {
                             return true;
                         }
-                    }
-                }
             }
         }
         false
@@ -895,7 +992,7 @@ impl App {
             let candidate = dir.join("cal");
             // Skip if it already exists and isn't ours
             if candidate.exists() && !std::fs::read_to_string(&candidate).ok()
-                .map_or(false, |s| s.contains("calendar-cli"))
+                .is_some_and(|s| s.contains("calendar-cli"))
             {
                 continue;
             }
@@ -910,9 +1007,7 @@ impl App {
 
         match installed {
             Some(path) => Ok(format!("✓ cal command registered at {}", path)),
-            None => Ok(format!(
-                "✓ cal registered at ~/.local/bin/cal  (add ~/.local/bin to your PATH)"
-            )),
+            None => Ok("✓ cal registered at ~/.local/bin/cal  (add ~/.local/bin to your PATH)".to_string()),
         }
     }
 
@@ -926,13 +1021,11 @@ impl App {
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
                 let candidate = dir.join("cal");
-                if candidate.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&candidate) {
-                        if content.contains("calendar-cli") {
+                if candidate.exists()
+                    && let Ok(content) = std::fs::read_to_string(&candidate)
+                        && content.contains("calendar-cli") {
                             let _ = std::fs::remove_file(&candidate);
                         }
-                    }
-                }
             }
         }
         Ok(())
@@ -965,10 +1058,10 @@ impl App {
     // ── Backend operations ───────────────────────────────────
 
     pub async fn refresh_events(&mut self) -> Result<()> {
-        let range_end = last_day_of_month(self.view_date);
+        let (range_start, range_end) = grid_range(self.view_date, self.first_day_of_week);
         let month_events = self
             .backend
-            .list_events_range(self.view_date, range_end)
+            .list_events_range(range_start, range_end)
             .await?;
         self.month_events = month_events;
         self.last_loaded_month = Some((self.view_date.year(), self.view_date.month()));
@@ -1125,6 +1218,18 @@ impl App {
 
 // ── Form key handler ────────────────────────────────────────────
 
+pub fn char_to_byte(value: &str, char_idx: usize) -> usize {
+    value
+        .char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(value.len())
+}
+
+fn num_chars(value: &str) -> usize {
+    value.chars().count()
+}
+
 fn handle_form_key(key: KeyEvent, form: &mut FormState) -> bool {
     match key.code {
         KeyCode::Tab | KeyCode::Down => {
@@ -1143,35 +1248,45 @@ fn handle_form_key(key: KeyEvent, form: &mut FormState) -> bool {
         }
         KeyCode::Right => {
             let f = &mut form.fields[form.focus];
-            f.cursor = (f.cursor + 1).min(f.value.len());
+            let nc = num_chars(&f.value);
+            if f.cursor < nc {
+                f.cursor += 1;
+            }
         }
         KeyCode::Backspace => {
             let f = &mut form.fields[form.focus];
             if f.cursor > 0 {
-                f.value.remove(f.cursor - 1);
+                let byte_pos = char_to_byte(&f.value, f.cursor - 1);
+                let c = f.value[byte_pos..].chars().next().unwrap();
+                f.value.drain(byte_pos..byte_pos + c.len_utf8());
                 f.cursor -= 1;
             }
         }
         KeyCode::Delete => {
             let f = &mut form.fields[form.focus];
-            if f.cursor < f.value.len() {
-                f.value.remove(f.cursor);
+            let nc = num_chars(&f.value);
+            if f.cursor < nc {
+                let byte_pos = char_to_byte(&f.value, f.cursor);
+                let c = f.value[byte_pos..].chars().next().unwrap();
+                f.value.drain(byte_pos..byte_pos + c.len_utf8());
             }
         }
         KeyCode::Home => {
             form.fields[form.focus].cursor = 0;
         }
         KeyCode::End => {
-            form.fields[form.focus].cursor = form.fields[form.focus].value.len();
+            form.fields[form.focus].cursor = num_chars(&form.fields[form.focus].value);
         }
         KeyCode::Char(' ') => {
             let f = &mut form.fields[form.focus];
-            f.value.insert(f.cursor, ' ');
+            let byte_pos = char_to_byte(&f.value, f.cursor);
+            f.value.insert(byte_pos, ' ');
             f.cursor += 1;
         }
         KeyCode::Char(c) if !c.is_control() => {
             let f = &mut form.fields[form.focus];
-            f.value.insert(f.cursor, c);
+            let byte_pos = char_to_byte(&f.value, f.cursor);
+            f.value.insert(byte_pos, c);
             f.cursor += 1;
         }
         KeyCode::Enter => return true,
@@ -1182,6 +1297,108 @@ fn handle_form_key(key: KeyEvent, form: &mut FormState) -> bool {
 
 fn is_cancel(key: KeyEvent) -> bool {
     matches!(key.code, KeyCode::Esc)
+}
+
+// ── Flexible time parsing ───────────────────────────────────────
+
+fn parse_time(s: &str) -> std::result::Result<chrono::NaiveTime, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("Time is required".into());
+    }
+    // HH:MM
+    if let Ok(t) = chrono::NaiveTime::parse_from_str(s, "%H:%M") {
+        return Ok(t);
+    }
+    // H:MM (single-digit hour, e.g. "9:30")
+    if let Ok(t) = chrono::NaiveTime::parse_from_str(s, "%k:%M") {
+        return Ok(t);
+    }
+    // HH:MMam/pm
+    if let Ok(t) = chrono::NaiveTime::parse_from_str(s, "%I:%M%P") {
+        return Ok(t);
+    }
+    if let Ok(t) = chrono::NaiveTime::parse_from_str(s, "%I:%M%p") {
+        return Ok(t);
+    }
+    // HHMM (compact, e.g. "1430")
+    if s.len() == 4 && s.chars().all(|c| c.is_ascii_digit())
+        && let (Ok(h), Ok(m)) = (s[..2].parse::<u32>(), s[2..].parse::<u32>())
+            && h < 24 && m < 60 {
+                return Ok(chrono::NaiveTime::from_hms_opt(h, m, 0).unwrap());
+            }
+    // HMM (compact, single-digit hour, e.g. "930")
+    if s.len() == 3 && s.chars().all(|c| c.is_ascii_digit())
+        && let (Ok(h), Ok(m)) = (s[..1].parse::<u32>(), s[1..].parse::<u32>())
+            && h < 24 && m < 60 {
+                return Ok(chrono::NaiveTime::from_hms_opt(h, m, 0).unwrap());
+            }
+    // Single hour (e.g. "9" → 9:00)
+    if let Ok(h) = s.parse::<u32>()
+        && h < 24 {
+            return Ok(chrono::NaiveTime::from_hms_opt(h, 0, 0).unwrap());
+        }
+    Err(format!("Invalid time \"{}\". Try HH:MM (e.g. 14:30)", s))
+}
+
+// ── Flexible date parsing ───────────────────────────────────────
+
+fn parse_date(s: &str) -> Option<NaiveDate> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let today = Local::now().naive_local().date();
+
+    // today, tomorrow, yesterday
+    match s.to_lowercase().as_str() {
+        "today" => return Some(today),
+        "tomorrow" => return Some(today + chrono::Duration::days(1)),
+        "yesterday" => return Some(today - chrono::Duration::days(1)),
+        _ => {}
+    }
+    // +N / -N (relative days)
+    if let Some(n) = s.strip_prefix('+').and_then(|n| n.parse::<i64>().ok()) {
+        return Some(today + chrono::Duration::days(n));
+    }
+    if let Some(n) = s.strip_prefix('-').and_then(|n| n.parse::<i64>().ok()) {
+        return Some(today - chrono::Duration::days(n));
+    }
+
+    // Full formats
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Some(d);
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%m/%d/%Y") {
+        return Some(d);
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%B %d, %Y") {
+        return Some(d);
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%b %d, %Y") {
+        return Some(d);
+    }
+
+    // Month + day (uses current year)
+    if let Ok(d) = NaiveDate::parse_from_str(&format!("{} {}", s, today.year()), "%B %d %Y") {
+        return Some(d);
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(&format!("{} {}", s, today.year()), "%b %d %Y") {
+        return Some(d);
+    }
+    // MM-DD (uses current year)
+    if let Ok(d) = NaiveDate::parse_from_str(&format!("{}-{}", today.year(), s), "%Y-%m-%d") {
+        return Some(d);
+    }
+    // Single day number (uses current month/year)
+    if let Ok(day) = s.parse::<u32>()
+        && (1..=31).contains(&day) {
+            let max = num_days_in_month(today.year(), today.month());
+            let day = day.min(max);
+            return NaiveDate::from_ymd_opt(today.year(), today.month(), day);
+        }
+
+    None
 }
 
 // ── Form parsing ────────────────────────────────────────────────
@@ -1204,7 +1421,7 @@ fn form_to_event(
         default_date
     } else {
         NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-            .map_err(|_| format!("Invalid date format — use YYYY-MM-DD"))?
+            .map_err(|_| "Invalid date — use YYYY-MM-DD".to_string())?
     };
 
     let start_str = form.fields.get(2).map(|f| f.value.trim()).unwrap_or("09:00");
@@ -1213,10 +1430,8 @@ fn form_to_event(
     let desc_str = form.fields.get(4).map(|f| f.value.trim()).unwrap_or("");
     let description = if desc_str.is_empty() { None } else { Some(desc_str.to_string()) };
 
-    let start_time = chrono::NaiveTime::parse_from_str(start_str, "%H:%M")
-        .map_err(|_| format!("Invalid start time — use HH:MM"))?;
-    let end_time = chrono::NaiveTime::parse_from_str(end_str, "%H:%M")
-        .map_err(|_| format!("Invalid end time — use HH:MM"))?;
+    let start_time = parse_time(start_str)?;
+    let end_time = parse_time(end_str)?;
 
     let start = date.and_time(start_time);
     let end = date.and_time(end_time);
@@ -1248,15 +1463,6 @@ fn next_month(date: NaiveDate) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, 1).unwrap()
 }
 
-fn last_day_of_month(date: NaiveDate) -> NaiveDate {
-    let (y, m) = if date.month() == 12 {
-        (date.year() + 1, 1)
-    } else {
-        (date.year(), date.month() + 1)
-    };
-    NaiveDate::from_ymd_opt(y, m, 1).unwrap().pred_opt().unwrap()
-}
-
 fn num_days_in_month(year: i32, month: u32) -> u32 {
     if month == 12 {
         NaiveDate::from_ymd_opt(year + 1, 1, 1)
@@ -1265,4 +1471,15 @@ fn num_days_in_month(year: i32, month: u32) -> u32 {
     }
     .map(|d| d.pred_opt().unwrap().day())
     .unwrap()
+}
+
+fn grid_range(view_date: NaiveDate, first_day_of_week: u8) -> (NaiveDate, NaiveDate) {
+    let dow = if first_day_of_week == 0 {
+        view_date.weekday().num_days_from_monday()
+    } else {
+        view_date.weekday().num_days_from_sunday()
+    };
+    let start = view_date - chrono::Duration::days(dow as i64);
+    let end = start + chrono::Duration::days(41);
+    (start, end)
 }
