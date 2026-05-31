@@ -32,11 +32,10 @@ async fn main() -> Result<()> {
                 println!("Connected to Google Calendar");
                 Box::new(gcal::GoogleCalendar::new(auth))
             } else {
-                println!("Session expired — press `g` in the app to sign in again");
+                println!("Session expired — sign in again from Settings");
                 Box::new(local::LocalCalendar::new(config.events_path()))
             }
         } else {
-            println!("Press `g` to sign in to Google Calendar");
             Box::new(local::LocalCalendar::new(config.events_path()))
         };
 

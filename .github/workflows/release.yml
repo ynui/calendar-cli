@@ -1,0 +1,26 @@
+name: Release
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - name: Archive binary
+        run: |
+          cd target/release
+          gzip -c calendar-cli > calendar-cli-darwin.gz
+          shasum -a 256 calendar-cli-darwin.gz > calendar-cli-darwin.gz.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.sha }}
+          name: "Build ${{ github.run_number }} (${{ github.sha }})"
+          body: "Latest build from main (${{ github.event.head_commit.message }})"
+          files: target/release/calendar-cli-darwin.gz*

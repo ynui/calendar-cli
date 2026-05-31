@@ -21,9 +21,9 @@ A terminal-based calendar app with Google Calendar sync, local event storage, an
 ```
 ╭── File    Calendar    Account    Help           Wed May 27 2026  14:30:05 ──╮
 │                                                                             │
-│  ┌────────── ◄  May 2026  ► ────────┐  ┌─── Wed, May 27 (3) ─────────────┐ │
+│  ┌────────── ◄  May 2026  ► ────────┐  ┌─── Wed, May 27 (3) ──────────────┐ │
 │  │ Mo Tu We Th Fr Sa Su             │  │  09:00 Standup                   │ │
-│  │              1  2  3  4  5       │  │  12:00 Lunch                     │ │
+│  │        1  2  3  4  5             │  │  12:00 Lunch                     │ │
 │  │  6  7  8  9 10 11 12             │  │  15:30 Review                    │ │
 │  │ 13 14 15 16 17 18 19             │  │                                  │ │
 │  │ 20 21 22 23 24 25·26             │  │                                  │ │
@@ -35,13 +35,17 @@ A terminal-based calendar app with Google Calendar sync, local event storage, an
 
 ## Installation
 
+### Homebrew (recommended)
+
 ```bash
-git clone <repo>
-cd calendar-cli
-cargo install --path .
+brew install ynui/tap/calendar-cli
 ```
 
-Requires Rust 2024 edition. The binary is named `calendar-cli`.
+### From source
+
+```bash
+cargo install --git https://github.com/ynui/calander
+```
 
 ## Usage
 
