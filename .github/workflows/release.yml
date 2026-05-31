@@ -18,9 +18,21 @@ jobs:
           cd target/release
           gzip -c calendar-cli > calendar-cli-darwin.gz
           shasum -a 256 calendar-cli-darwin.gz > calendar-cli-darwin.gz.sha256
+      - name: Set version
+        id: version
+        run: |
+          VERSION="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)"
+          echo "RELEASE_TAG=$VERSION" >> $GITHUB_ENV
+          echo "release_tag=$VERSION" >> $GITHUB_OUTPUT
+      - name: Delete previous release
+        run: |
+          gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
+          git push origin ":refs/tags/$RELEASE_TAG" 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.sha }}
-          name: "Build ${{ github.run_number }} (${{ github.sha }})"
-          body: "Latest build from main (${{ github.event.head_commit.message }})"
+          tag_name: ${{ steps.version.outputs.release_tag }}
+          name: ${{ steps.version.outputs.release_tag }}
+          body: "Build ${{ github.run_number }} — ${{ github.event.head_commit.message }}"
           files: target/release/calendar-cli-darwin.gz*
