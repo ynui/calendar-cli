@@ -9,7 +9,7 @@ mod ui;
 
 use anyhow::{Context, Result};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
