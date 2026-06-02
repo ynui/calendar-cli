@@ -161,7 +161,8 @@ impl GoogleAuth {
 
                 let stored = StoredToken {
                     access_token: new_token.access_token().secret().clone(),
-                    refresh_token: new_token.refresh_token().map(|t| t.secret().clone()),
+                    refresh_token: new_token.refresh_token().map(|t| t.secret().clone())
+                        .or_else(|| self.token.as_ref().and_then(|t| t.refresh_token.clone())),
                     expires_at: None,
                 };
                 let json = serde_json::to_string_pretty(&stored)?;

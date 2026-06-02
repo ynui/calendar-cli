@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::app::ThemeKind;
+use crate::app::{DanceStyle, ThemeKind};
 
 include!(concat!(env!("OUT_DIR"), "/credentials.rs"));
 
@@ -12,6 +12,8 @@ pub struct Settings {
     pub first_day_of_week: u8,
     #[serde(default)]
     pub theme: String,
+    #[serde(default)]
+    pub dance_style: String,
 }
 
 impl Default for Settings {
@@ -19,6 +21,7 @@ impl Default for Settings {
         Self {
             first_day_of_week: 0,
             theme: "default".to_string(),
+            dance_style: "none".to_string(),
         }
     }
 }
@@ -26,6 +29,10 @@ impl Default for Settings {
 impl Settings {
     pub fn theme_kind(&self) -> ThemeKind {
         self.theme.parse().unwrap_or(ThemeKind::Default)
+    }
+
+    pub fn dance_style(&self) -> DanceStyle {
+        self.dance_style.parse().unwrap_or(DanceStyle::None)
     }
 }
 
@@ -43,10 +50,8 @@ impl Config {
         std::fs::create_dir_all(&config_dir)?;
 
         let credentials_path = config_dir.join("credentials.json");
-        if !credentials_path.exists() {
-            if let Some(creds) = EMBEDDED_CREDENTIALS {
-                std::fs::write(&credentials_path, creds)?;
-            }
+        if !credentials_path.exists() && let Some(creds) = EMBEDDED_CREDENTIALS {
+            std::fs::write(&credentials_path, creds)?;
         }
 
         Ok(Config {

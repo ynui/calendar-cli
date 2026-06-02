@@ -86,7 +86,54 @@ pub enum MenuAction {
 pub enum ThemeKind {
     Default,
     Light,
-    Ocean,
+    Dracula,
+    Nord,
+    Gruvbox,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DanceStyle {
+    None,
+    Dancer,
+    Bounce,
+    Sway,
+    Shrug,
+}
+
+impl DanceStyle {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DanceStyle::None => "none",
+            DanceStyle::Dancer => "dancer",
+            DanceStyle::Bounce => "bounce",
+            DanceStyle::Sway => "sway",
+            DanceStyle::Shrug => "shrug",
+        }
+    }
+
+    pub fn frames(&self) -> &[&'static str] {
+        match self {
+            DanceStyle::None => &[""],
+            DanceStyle::Dancer => &["d(>_<)b", "d(>_<) ", " (>_<)b", " (>_<) "],
+            DanceStyle::Bounce => &["(o.o)", "(0.0)", "(O.O)", "(0.0)"],
+            DanceStyle::Sway => &["(>_<)", "(>_>)", "(>_<)", "(<_<)"],
+            DanceStyle::Shrug => &["\\o/", "-o-", "/o\\", "-o-"],
+        }
+    }
+}
+
+impl FromStr for DanceStyle {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "dancer" => Ok(DanceStyle::Dancer),
+            "bounce" => Ok(DanceStyle::Bounce),
+            "sway" => Ok(DanceStyle::Sway),
+            "shrug" => Ok(DanceStyle::Shrug),
+            _ => Ok(DanceStyle::None),
+        }
+    }
 }
 
 pub struct Theme {
@@ -105,7 +152,9 @@ impl ThemeKind {
         match self {
             ThemeKind::Default => "default",
             ThemeKind::Light => "light",
-            ThemeKind::Ocean => "ocean",
+            ThemeKind::Dracula => "dracula",
+            ThemeKind::Nord => "nord",
+            ThemeKind::Gruvbox => "gruvbox",
         }
     }
 }
@@ -116,7 +165,9 @@ impl FromStr for ThemeKind {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "light" => Ok(ThemeKind::Light),
-            "ocean" => Ok(ThemeKind::Ocean),
+            "dracula" => Ok(ThemeKind::Dracula),
+            "nord" => Ok(ThemeKind::Nord),
+            "gruvbox" => Ok(ThemeKind::Gruvbox),
             _ => Ok(ThemeKind::Default),
         }
     }
@@ -145,15 +196,35 @@ impl Theme {
                 dim: Style::new().fg(Color::Gray),
                 accent_bold: Style::new().fg(Color::Black).add_modifier(Modifier::BOLD),
             },
-            ThemeKind::Ocean => Self {
-                selected_bg: Color::Rgb(30, 70, 110),
-                today: Style::new().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
-                active_border: Color::LightCyan,
-                inactive_border: Color::DarkGray,
-                weekend: Color::DarkGray,
-                help_key: Style::new().fg(Color::LightCyan),
-                dim: Style::new().fg(Color::DarkGray),
-                accent_bold: Style::new().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            ThemeKind::Dracula => Self {
+                selected_bg: Color::Rgb(68, 71, 90),
+                today: Style::new().fg(Color::Rgb(255, 184, 108)).add_modifier(Modifier::BOLD),
+                active_border: Color::Rgb(255, 121, 198),
+                inactive_border: Color::Rgb(98, 114, 164),
+                weekend: Color::Rgb(139, 143, 167),
+                help_key: Style::new().fg(Color::Rgb(139, 233, 253)),
+                dim: Style::new().fg(Color::Rgb(98, 114, 164)),
+                accent_bold: Style::new().fg(Color::Rgb(189, 147, 249)).add_modifier(Modifier::BOLD),
+            },
+            ThemeKind::Nord => Self {
+                selected_bg: Color::Rgb(59, 66, 82),
+                today: Style::new().fg(Color::Rgb(163, 190, 140)).add_modifier(Modifier::BOLD),
+                active_border: Color::Rgb(136, 192, 208),
+                inactive_border: Color::Rgb(67, 76, 94),
+                weekend: Color::Rgb(79, 89, 109),
+                help_key: Style::new().fg(Color::Rgb(129, 161, 193)),
+                dim: Style::new().fg(Color::Rgb(67, 76, 94)),
+                accent_bold: Style::new().fg(Color::Rgb(136, 192, 208)).add_modifier(Modifier::BOLD),
+            },
+            ThemeKind::Gruvbox => Self {
+                selected_bg: Color::Rgb(60, 56, 54),
+                today: Style::new().fg(Color::Rgb(215, 153, 33)).add_modifier(Modifier::BOLD),
+                active_border: Color::Rgb(184, 187, 38),
+                inactive_border: Color::Rgb(80, 73, 69),
+                weekend: Color::Rgb(146, 131, 116),
+                help_key: Style::new().fg(Color::Rgb(152, 151, 26)),
+                dim: Style::new().fg(Color::Rgb(102, 92, 84)),
+                accent_bold: Style::new().fg(Color::Rgb(214, 93, 14)).add_modifier(Modifier::BOLD),
             },
         }
     }
@@ -198,6 +269,8 @@ pub struct App {
     pub view_mode: ViewMode,
     pub theme_kind: ThemeKind,
     pub theme: Theme,
+    pub dance_style: DanceStyle,
+    pub frame: usize,
 }
 
 impl App {
@@ -234,6 +307,8 @@ impl App {
             view_mode: ViewMode::Month,
             theme_kind,
             theme,
+            dance_style: settings.dance_style(),
+            frame: 0,
         }
     }
 
@@ -254,6 +329,7 @@ impl App {
         self.refresh_events().await?;
 
         loop {
+            self.frame = self.frame.wrapping_add(1);
             self.try_complete_auth().await;
 
             // Deferred refresh: draw loading state, then fetch
@@ -291,8 +367,15 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> Result<Action> {
-        if matches!(key.code, KeyCode::Esc) && matches!(self.auth_state, AuthState::Message(_)) {
-            self.auth_state = AuthState::Idle;
+        self.status.clear();
+        if matches!(self.auth_state, AuthState::Message(_)) {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.auth_state = AuthState::Idle;
+                    return Ok(Action::None);
+                }
+                _ => return Ok(Action::None),
+            }
         }
         match &mut self.mode {
             Mode::Normal => self.handle_normal_key(key).await,
@@ -429,7 +512,7 @@ impl App {
                         self.mode = Mode::Normal;
                     }
                     KeyCode::Down | KeyCode::Tab => {
-                        self.settings_focus = (self.settings_focus + 1).min(4);
+                        self.settings_focus = (self.settings_focus + 1).min(5);
                     }
                     KeyCode::Up | KeyCode::BackTab => {
                         self.settings_focus = self.settings_focus.saturating_sub(1);
@@ -455,6 +538,7 @@ impl App {
                             let settings = Settings {
                                 first_day_of_week: self.first_day_of_week,
                                 theme: self.theme_kind.as_str().to_string(),
+                                dance_style: self.dance_style.as_str().to_string(),
                             };
                             if let Ok(s) = serde_json::to_string_pretty(&settings) {
                                 let _ = std::fs::write(&self.settings_path, s);
@@ -462,19 +546,33 @@ impl App {
                             self.refresh_events().await?;
                         }
                         3 => {
-                            let kinds = [ThemeKind::Default, ThemeKind::Light, ThemeKind::Ocean];
+                            let kinds = [ThemeKind::Default, ThemeKind::Light, ThemeKind::Dracula, ThemeKind::Nord, ThemeKind::Gruvbox];
                             let idx = kinds.iter().position(|k| *k == self.theme_kind).unwrap_or(0);
                             self.theme_kind = kinds[(idx + 1) % kinds.len()];
                             self.theme = Theme::for_kind(self.theme_kind);
                             let settings = Settings {
                                 first_day_of_week: self.first_day_of_week,
                                 theme: self.theme_kind.as_str().to_string(),
+                                dance_style: self.dance_style.as_str().to_string(),
                             };
                             if let Ok(s) = serde_json::to_string_pretty(&settings) {
                                 let _ = std::fs::write(&self.settings_path, s);
                             }
                         }
                         4 => {
+                            let styles = [DanceStyle::None, DanceStyle::Dancer, DanceStyle::Bounce, DanceStyle::Sway, DanceStyle::Shrug];
+                            let idx = styles.iter().position(|s| *s == self.dance_style).unwrap_or(0);
+                            self.dance_style = styles[(idx + 1) % styles.len()];
+                            let settings = Settings {
+                                first_day_of_week: self.first_day_of_week,
+                                theme: self.theme_kind.as_str().to_string(),
+                                dance_style: self.dance_style.as_str().to_string(),
+                            };
+                            if let Ok(s) = serde_json::to_string_pretty(&settings) {
+                                let _ = std::fs::write(&self.settings_path, s);
+                            }
+                        }
+                        5 => {
                             if Self::is_cal_registered() {
                                 if let Err(e) = Self::unregister_cal() {
                                     self.status = format!("✗ Failed to unregister cal: {}", e);
@@ -852,9 +950,13 @@ impl App {
 
     /// Non-blocking: try to accept a redirect on the TCP listener.
     async fn try_complete_auth(&mut self) {
-        let (listener, csrf) = match std::mem::replace(&mut self.auth_state, AuthState::Idle) {
-            AuthState::Listening { listener, csrf } => (listener, csrf),
-            _ => return,
+        if !matches!(self.auth_state, AuthState::Listening { .. }) {
+            return;
+        }
+        let AuthState::Listening { listener, csrf } =
+            std::mem::replace(&mut self.auth_state, AuthState::Idle)
+        else {
+            unreachable!()
         };
 
         // Try non-blocking accept
@@ -965,7 +1067,14 @@ impl App {
     }
 
     pub fn register_cal() -> anyhow::Result<String> {
+        // Prefer release binary over debug
         let exe = std::env::current_exe()?;
+        let release = exe.parent().and_then(|p| {
+            let p = p.parent()?;
+            let r = p.join("release").join("calendar-cli");
+            if r.exists() { Some(r) } else { None }
+        });
+        let exe = release.unwrap_or(exe);
         let wrapper = format!("#!/bin/sh\nexec {} \"$@\"\n", exe.display());
 
         // Find a writable directory that's in PATH

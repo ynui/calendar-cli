@@ -13,6 +13,11 @@ use anyhow::{Context, Result};
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("calendar-cli v{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     if args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
         print_usage();
         return Ok(());
@@ -67,8 +72,10 @@ async fn cmd_login() -> Result<()> {
 
 fn print_usage() {
     let name = std::env::args().next().unwrap_or_else(|| "calendar-cli".into());
+    eprintln!("calendar-cli v{}", env!("CARGO_PKG_VERSION"));
     eprintln!("Usage:");
     eprintln!("  {name}                    Start the TUI calendar app");
     eprintln!("  {name} --login            Re-authenticate with Google Calendar");
-    eprintln!("  {name} --help             Show this help");
+    eprintln!("  {name} --version / -V     Show version");
+    eprintln!("  {name} --help / -h        Show this help");
 }

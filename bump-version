@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+usage() {
+    cat >&2 <<EOF
+Usage: $0 <major|minor|patch|<semver>>
+
+Examples:
+  $0 patch          # 0.1.1 -> 0.1.2
+  $0 minor          # 0.1.1 -> 0.2.0
+  $0 major          # 0.1.1 -> 1.0.0
+  $0 0.3.0          # explicit version
+EOF
+    exit 1
+}
+
+CURRENT=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
+if [[ -z "$CURRENT" ]]; then
+    echo "error: could not read version from Cargo.toml" >&2
+    exit 1
+fi
+
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+case "${1:-}" in
+    major)
+        MAJOR=$((MAJOR + 1))
+        MINOR=0
+        PATCH=0
+        ;;
+    minor)
+        MINOR=$((MINOR + 1))
+        PATCH=0
+        ;;
+    patch)
+        PATCH=$((PATCH + 1))
+        ;;
+    ''|--help|-h)
+        usage
+        ;;
+    *)
+        NEW="$1"
+        if ! echo "$NEW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "error: '$1' is not a valid semver (expected major|minor|patch or X.Y.Z)" >&2
+            exit 1
+        fi
+        NEW_VERSION="$NEW"
+        ;;
+esac
+
+NEW_VERSION="${NEW_VERSION:-$MAJOR.$MINOR.$PATCH}"
+
+sed -i '' "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" Cargo.toml
+
+echo "$CURRENT -> $NEW_VERSION"

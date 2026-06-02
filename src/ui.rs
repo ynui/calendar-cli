@@ -2,7 +2,7 @@ use chrono::{Datelike, Local, NaiveDate, Weekday};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 use unicode_bidi::BidiInfo;
 
@@ -112,10 +112,19 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     // Push time to the right
+    let mut dance = String::new();
+    if app.dance_style != crate::app::DanceStyle::None {
+        let frames = app.dance_style.frames();
+        let frame = frames[app.frame % frames.len()];
+        dance = format!(" {} ", frame);
+    }
     let used: usize = spans.iter().map(|s| s.content.len()).sum();
-    let pad = area.width.saturating_sub(used as u16 + time.len() as u16);
+    let pad = area.width.saturating_sub(used as u16 + dance.len() as u16 + time.len() as u16);
     if pad > 0 {
         spans.push(Span::raw(" ".repeat(pad as usize)));
+    }
+    if !dance.is_empty() {
+        spans.push(Span::styled(dance, Style::new().fg(Color::Cyan)));
     }
     spans.push(Span::styled(time, Style::new().fg(Color::Yellow)));
 
@@ -940,7 +949,7 @@ fn render_menu_dropdown(frame: &mut Frame, app: &App) {
 
 fn render_settings(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    let popup = centered_rect(64, 22, area);
+    let popup = centered_rect(64, 23, area);
 
     frame.render_widget(Clear, popup);
 
@@ -1020,19 +1029,45 @@ fn render_settings(frame: &mut Frame, app: &App) {
     let theme_name = match app.theme_kind {
         crate::app::ThemeKind::Default => "Default",
         crate::app::ThemeKind::Light => "Light",
-        crate::app::ThemeKind::Ocean => "Ocean",
+        crate::app::ThemeKind::Dracula => "Dracula",
+        crate::app::ThemeKind::Nord => "Nord",
+        crate::app::ThemeKind::Gruvbox => "Gruvbox",
     };
     lines.push(Line::from(vec![
         Span::styled("  Theme: ", val),
         Span::styled(theme_name, action),
     ]).style(if theme_focused { focus_bg } else { Style::new() }));
 
+    let dance_focused = app.settings_focus == 4;
+    let dance_name = match app.dance_style {
+        crate::app::DanceStyle::None => "None",
+        crate::app::DanceStyle::Dancer => "Dancer",
+        crate::app::DanceStyle::Bounce => "Bounce",
+        crate::app::DanceStyle::Sway => "Sway",
+        crate::app::DanceStyle::Shrug => "Shrug",
+    };
+    lines.push(Line::from(vec![
+        Span::styled("  Dance: ", val),
+        Span::styled(dance_name, action),
+    ]).style(if dance_focused { focus_bg } else { Style::new() }));
+
+    let sub = match app.dance_style {
+        crate::app::DanceStyle::None => String::new(),
+        _ => {
+            let frames = app.dance_style.frames();
+            frames[app.frame % frames.len()].to_string()
+        }
+    };
+    if !sub.is_empty() {
+        lines.last_mut().unwrap().push_span(Span::raw(format!("  {}", sub)));
+    }
+
     lines.push(Line::from(""));
 
     // ── Shell ──
     lines.push(Line::from(Span::styled(" Shell", header)));
 
-    let cal_focused = app.settings_focus == 4;
+    let cal_focused = app.settings_focus == 5;
     if cal_registered {
         lines.push(Line::from(vec![
             Span::styled("  ✓ ", green),
@@ -1050,10 +1085,19 @@ fn render_settings(frame: &mut Frame, app: &App) {
     }
 
     lines.push(Line::from(""));
+    lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("  [\u{2191}/\u{2193}] Navigate  ", Style::new().fg(Color::Green)),
         Span::styled("[Enter] Toggle  ", Style::new().fg(Color::Green)),
         Span::styled("[Esc] Back", dim),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!(" calendar-cli v{}", env!("CARGO_PKG_VERSION")),
+            dim.add_modifier(Modifier::ITALIC),
+        ),
     ]));
 
     frame.render_widget(
@@ -1066,7 +1110,7 @@ fn render_settings(frame: &mut Frame, app: &App) {
 
 fn render_auth_dialog(frame: &mut Frame, message: &str, app: &App) {
     let area = frame.area();
-    let popup = centered_rect(56, 7, area);
+    let popup = centered_rect(60, 8, area);
 
     frame.render_widget(Clear, popup);
 
@@ -1102,7 +1146,9 @@ fn render_auth_dialog(frame: &mut Frame, message: &str, app: &App) {
     ];
 
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::new().bg(Color::Black)),
+        Paragraph::new(Text::from(lines))
+            .style(Style::new().bg(Color::Black))
+            .wrap(Wrap { trim: false }),
         inner,
     );
 }
