@@ -54,7 +54,7 @@ cargo install --git https://github.com/ynui/calendar-cli
 Run from your terminal:
 
 ```bash
-calendar-cli
+calendar-cli        # or the short alias: ccli
 ```
 
 Register a `cal` command (optional, via Settings > Shell) to launch with just `cal`.
