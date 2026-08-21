@@ -54,4 +54,8 @@ NEW_VERSION="${NEW_VERSION:-$MAJOR.$MINOR.$PATCH}"
 
 sed -i '' "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" Cargo.toml
 
+if [[ -f Cargo.lock ]]; then
+    sed -i '' "/^name = \"calendar-cli\"$/{N;s/version = \"$CURRENT\"/version = \"$NEW_VERSION\"/;}" Cargo.lock
+fi
+
 echo "$CURRENT -> $NEW_VERSION"

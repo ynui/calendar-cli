@@ -41,10 +41,12 @@ A terminal-based calendar app with Google Calendar sync, local event storage, an
 brew install ynui/tap/calendar-cli
 ```
 
+Universal binary — Apple Silicon and Intel.
+
 ### From source
 
 ```bash
-cargo install --git https://github.com/ynui/calander
+cargo install --git https://github.com/ynui/calendar-cli
 ```
 
 ## Usage
@@ -85,8 +87,6 @@ Register a `cal` command (optional, via Settings > Shell) to launch with just `c
 3. Create OAuth 2.0 credentials (Desktop app type)
 4. Download the JSON and place it at `~/.config/calendar-cli/credentials.json`
 
-Or let the app write the embedded development credentials on first run (if included in the build).
-
 Sign in via **Account > Sign In to Google** in the menu bar. Your browser will open for authorization.
 
 ## Settings
@@ -119,6 +119,13 @@ Config directory: `~/.config/calendar-cli/`
 | `token.json` | Google OAuth access/refresh token |
 | `events.json` | Local event store |
 | `settings.json` | Preferences (theme, week start) |
+
+## Releasing
+
+```bash
+./bump-version patch   # or minor / major / X.Y.Z
+git push               # CI builds the universal binary, publishes the release, updates Homebrew
+```
 
 ## Architecture
 
