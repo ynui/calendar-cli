@@ -39,6 +39,7 @@ pub enum Mode {
     Deleting,
     ConfirmingQuit,
     Help,
+    Setup,
     Settings,
     JumpToDate(String, usize),
     ViewingDetail(CalendarEvent),
@@ -421,6 +422,12 @@ impl App {
                 }
                 Ok(Action::None)
             }
+            Mode::Setup => {
+                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+                    self.mode = Mode::Normal;
+                }
+                Ok(Action::None)
+            }
             Mode::JumpToDate(value, cursor) => {
                 match key.code {
                     KeyCode::Enter => {
@@ -529,10 +536,7 @@ impl App {
                             {
                                 self.start_auth().await;
                             } else {
-                                self.status = format!(
-                                    "No credentials.json found in {}",
-                                    self.config_credentials_path.ancestors().nth(1).unwrap_or(self.config_credentials_path.as_path()).display()
-                                );
+                                self.mode = Mode::Setup;
                             }
                         }
                         2 => {
