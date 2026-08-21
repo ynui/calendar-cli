@@ -50,6 +50,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         Mode::Deleting => render_delete_dialog(frame, app),
         Mode::ConfirmingQuit => render_confirm_quit(frame, app),
         Mode::Help => render_help(frame, app),
+        Mode::Setup => render_setup(frame, app),
         Mode::Settings => render_settings(frame, app),
         Mode::JumpToDate(value, cursor) => render_jump_date(frame, value, *cursor, app),
         Mode::ViewingDetail(event) => render_event_detail(frame, event, app),
@@ -155,6 +156,7 @@ fn status_text(app: &App) -> String {
         Mode::Deleting => "[Enter] Confirm  [Esc] Cancel".into(),
         Mode::ConfirmingQuit => "[y] Yes  [n] No  [Enter] Yes  [Esc] No".into(),
         Mode::Help => "[Esc] Close".into(),
+        Mode::Setup => "[Esc] Close".into(),
         Mode::Settings => "[Enter] Execute  [Esc] Back".into(),
         Mode::ViewingDetail(_) => "[Esc] Close".into(),
         Mode::ViewingEvents(_, _) => "[Up/Down] Navigate  [Enter] Details  [Esc] Close".into(),
@@ -851,6 +853,52 @@ fn render_confirm_quit(frame: &mut Frame, app: &App) {
 }
 
 // ── Help overlay ────────────────────────────────────────────────
+
+fn render_setup(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+    let popup = centered_rect(72, 20, area);
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Google Calendar Setup ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(app.theme.active_border));
+
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let config_dir = app
+        .config_credentials_path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "~/.config/calendar-cli".to_string());
+
+    let text = Text::from(vec![
+        Line::from(Span::styled("  One-time setup:", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::raw("  1. Go to https://console.cloud.google.com")),
+        Line::from(Span::raw("  2. Enable the Google Calendar API")),
+        Line::from(Span::raw("  3. Create OAuth 2.0 credentials (Desktop app type)")),
+        Line::from(Span::raw("")),
+        Line::from(Span::styled("  4. Save them as credentials.json in:", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::styled(format!("     {config_dir}"), Style::new().fg(Color::Yellow))),
+        Line::from(Span::raw("")),
+        Line::from(Span::styled("  Example file:", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::raw("  {")),
+        Line::from(Span::raw("    \"installed\": {")),
+        Line::from(Span::raw("      \"client_id\": \"xxx.apps.googleusercontent.com\",")),
+        Line::from(Span::raw("      \"client_secret\": \"GOCSPX-...\",")),
+        Line::from(Span::raw("      \"redirect_uris\": [\"http://localhost:8080\"]")),
+        Line::from(Span::raw("    }")),
+        Line::from(Span::raw("  }")),
+        Line::from(Span::raw("")),
+        Line::from(Span::styled("  Then: Account > Sign In to Google.        [Esc] Close", Style::new().fg(Color::DarkGray))),
+    ]);
+
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
+}
 
 fn render_help(frame: &mut Frame, app: &App) {
     let area = frame.area();

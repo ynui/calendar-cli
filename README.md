@@ -54,7 +54,7 @@ cargo install --git https://github.com/ynui/calendar-cli
 Run from your terminal:
 
 ```bash
-calendar-cli        # or the short alias: ccli
+calendar-cli        # or the short alias: ccal
 ```
 
 Register a `cal` command (optional, via Settings > Shell) to launch with just `cal`.
@@ -88,6 +88,8 @@ Register a `cal` command (optional, via Settings > Shell) to launch with just `c
 4. Download the JSON and place it at `credentials.json` in the config directory (macOS: `~/Library/Application Support/calendar-cli/`, Linux: `~/.config/calendar-cli/`)
 
 Sign in via **Account > Sign In to Google** in the menu bar. Your browser will open for authorization.
+
+Tip: if `credentials.json` is missing, choosing **Sign In** opens an in-app setup screen showing the exact path and an example file.
 
 ## Settings
 
