@@ -529,8 +529,10 @@ impl App {
                             {
                                 self.start_auth().await;
                             } else {
-                                self.status =
-                                    "No credentials.json found in ~/.config/calendar-cli/".into();
+                                self.status = format!(
+                                    "No credentials.json found in {}",
+                                    self.config_credentials_path.ancestors().nth(1).unwrap_or(self.config_credentials_path.as_path()).display()
+                                );
                             }
                         }
                         2 => {
