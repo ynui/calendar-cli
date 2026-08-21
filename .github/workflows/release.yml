@@ -8,21 +8,33 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: macos-latest
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      exists: ${{ steps.v.outputs.exists }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Skip if this version is already released
+      - id: v
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "Release $VERSION already exists; nothing to do"
-            exit 0
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.exists == 'false'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,7 +58,7 @@ jobs:
         with:
           tag_name: ${{ env.VERSION }}
           name: ${{ env.VERSION }}
-          body: "Autonomous sensors calendar-cli ${{ env.VERSION }}"
+          body: "calendar-cli ${{ env.VERSION }}"
           files: |
             calendar-cli-${{ env.VERSION }}-universal.tar.gz
             calendar-cli-${{ env.VERSION }}-universal.tar.gz.sha256
@@ -65,4 +77,9 @@ jobs:
                     -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Formula/calendar-cli.rb
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "calendar-cli $VER" && git push
+          if ! git diff --quiet; then
+            git commit -am "calendar-cli $VER"
+            git push
+          else
+            echo "Tap formula already up to date"
+          fi

@@ -38,7 +38,7 @@ A terminal-based calendar app with Google Calendar sync, local event storage, an
 ### Homebrew (recommended)
 
 ```bash
-brew install --HEAD ynui/tap/calendar-cli
+brew install ynui/tap/calendar-cli
 ```
 
 ### From source
