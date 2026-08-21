@@ -85,7 +85,7 @@ Register a `cal` command (optional, via Settings > Shell) to launch with just `c
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a project, enable the **Google Calendar API**
 3. Create OAuth 2.0 credentials (Desktop app type)
-4. Download the JSON and place it at `~/.config/calendar-cli/credentials.json`
+4. Download the JSON and place it at `credentials.json` in the config directory (macOS: `~/Library/Application Support/calendar-cli/`, Linux: `~/.config/calendar-cli/`)
 
 Sign in via **Account > Sign In to Google** in the menu bar. Your browser will open for authorization.
 
@@ -111,7 +111,7 @@ Access via **File > Settings** (or menu bar).
 
 ## Data Storage
 
-Config directory: `~/.config/calendar-cli/`
+Config directory: `~/Library/Application Support/calendar-cli/` (macOS) or `~/.config/calendar-cli/` (Linux)
 
 | File | Purpose |
 |---|---|
