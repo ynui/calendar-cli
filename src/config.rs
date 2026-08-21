@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use crate::app::{DanceStyle, ThemeKind};
 
@@ -50,7 +50,9 @@ impl Config {
         std::fs::create_dir_all(&config_dir)?;
 
         let credentials_path = config_dir.join("credentials.json");
-        if !credentials_path.exists() && let Some(creds) = EMBEDDED_CREDENTIALS {
+        if !credentials_path.exists()
+            && let Some(creds) = EMBEDDED_CREDENTIALS
+        {
             std::fs::write(&credentials_path, creds)?;
         }
 
@@ -74,5 +76,4 @@ impl Config {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     }
-
 }
