@@ -14,6 +14,10 @@ fn main() {
         .unwrap();
         println!("cargo:rerun-if-changed=credentials.json");
     } else {
-        fs::write(&creds_file, "pub const EMBEDDED_CREDENTIALS: Option<&str> = None;").unwrap();
+        fs::write(
+            &creds_file,
+            "pub const EMBEDDED_CREDENTIALS: Option<&str> = None;",
+        )
+        .unwrap();
     }
 }
