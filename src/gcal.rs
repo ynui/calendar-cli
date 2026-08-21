@@ -72,8 +72,16 @@ impl CalendarBackend for GoogleCalendar {
     ) -> Result<Vec<CalendarEvent>> {
         let token = self.auth.get_access_token().await?;
 
-        let time_min = start.and_hms_opt(0, 0, 0).expect("valid time").and_utc().to_rfc3339();
-        let time_max = end.and_hms_opt(23, 59, 59).expect("valid time").and_utc().to_rfc3339();
+        let time_min = start
+            .and_hms_opt(0, 0, 0)
+            .expect("valid time")
+            .and_utc()
+            .to_rfc3339();
+        let time_max = end
+            .and_hms_opt(23, 59, 59)
+            .expect("valid time")
+            .and_utc()
+            .to_rfc3339();
 
         let resp = self
             .http

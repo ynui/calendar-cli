@@ -18,7 +18,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if args.iter().any(|a| a == "--help" || a == "-h" || a == "help") {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help")
+    {
         print_usage();
         return Ok(());
     }
@@ -29,20 +32,19 @@ async fn main() -> Result<()> {
 
     let config = config::Config::load()?;
 
-    let backend: Box<dyn backend::CalendarBackend> =
-        if config.token_path.exists() {
-            let auth =
-                auth::GoogleAuth::load(&config.credentials_path, config.token_path.clone()).await?;
-            if !auth.needs_auth() {
-                println!("Connected to Google Calendar");
-                Box::new(gcal::GoogleCalendar::new(auth))
-            } else {
-                println!("Session expired — sign in again from Settings");
-                Box::new(local::LocalCalendar::new(config.events_path()))
-            }
+    let backend: Box<dyn backend::CalendarBackend> = if config.token_path.exists() {
+        let auth =
+            auth::GoogleAuth::load(&config.credentials_path, config.token_path.clone()).await?;
+        if !auth.needs_auth() {
+            println!("Connected to Google Calendar");
+            Box::new(gcal::GoogleCalendar::new(auth))
         } else {
+            println!("Session expired — sign in again from Settings");
             Box::new(local::LocalCalendar::new(config.events_path()))
-        };
+        }
+    } else {
+        Box::new(local::LocalCalendar::new(config.events_path()))
+    };
 
     let mut terminal = ratatui::init();
     let mut app = app::App::new(backend, &config);
@@ -59,7 +61,10 @@ async fn cmd_login() -> Result<()> {
     let mut gcal = gcal::GoogleCalendar::new(auth);
 
     if !gcal.needs_auth() {
-        println!("Already authenticated. Token saved at: {}", config.token_path.display());
+        println!(
+            "Already authenticated. Token saved at: {}",
+            config.token_path.display()
+        );
         return Ok(());
     }
 
@@ -71,7 +76,9 @@ async fn cmd_login() -> Result<()> {
 }
 
 fn print_usage() {
-    let name = std::env::args().next().unwrap_or_else(|| "calendar-cli".into());
+    let name = std::env::args()
+        .next()
+        .unwrap_or_else(|| "calendar-cli".into());
     eprintln!("calendar-cli v{}", env!("CARGO_PKG_VERSION"));
     eprintln!("Usage:");
     eprintln!("  {name}                    Start the TUI calendar app");

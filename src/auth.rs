@@ -4,8 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet,
-    RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
-    basic::BasicClient,
+    RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl, basic::BasicClient,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -49,8 +48,8 @@ impl GoogleAuth {
             );
         }
 
-        let creds_json = std::fs::read_to_string(credentials_path)
-            .context("Failed to read credentials.json")?;
+        let creds_json =
+            std::fs::read_to_string(credentials_path).context("Failed to read credentials.json")?;
         let creds: GoogleCredentials =
             serde_json::from_str(&creds_json).context("Failed to parse credentials.json")?;
 
@@ -97,7 +96,11 @@ impl GoogleAuth {
         let (url, csrf) = self.generate_auth_url();
 
         println!("Opening browser for Google Calendar authorization...");
-        if std::process::Command::new("open").arg(&url).spawn().is_err() {
+        if std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .is_err()
+        {
             println!("Please open this URL in your browser:\n{}", url);
         }
 
@@ -146,9 +149,10 @@ impl GoogleAuth {
     pub async fn get_access_token(&mut self) -> Result<String> {
         if let Some(ref token) = self.token {
             if let Some(expires_at) = token.expires_at
-                && Utc::now() < expires_at {
-                    return Ok(token.access_token.clone());
-                }
+                && Utc::now() < expires_at
+            {
+                return Ok(token.access_token.clone());
+            }
 
             if let Some(ref refresh_token_str) = token.refresh_token {
                 let http_client = reqwest::Client::new();
@@ -161,7 +165,9 @@ impl GoogleAuth {
 
                 let stored = StoredToken {
                     access_token: new_token.access_token().secret().clone(),
-                    refresh_token: new_token.refresh_token().map(|t| t.secret().clone())
+                    refresh_token: new_token
+                        .refresh_token()
+                        .map(|t| t.secret().clone())
                         .or_else(|| self.token.as_ref().and_then(|t| t.refresh_token.clone())),
                     expires_at: None,
                 };

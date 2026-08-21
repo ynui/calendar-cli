@@ -1,12 +1,12 @@
 use chrono::{Datelike, Local, NaiveDate, Weekday};
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
-use ratatui::Frame;
 use unicode_bidi::BidiInfo;
 
-use crate::app::{char_to_byte, App, AuthState, Focus, Mode, ViewMode};
+use crate::app::{App, AuthState, Focus, Mode, ViewMode, char_to_byte};
 use crate::models::{CalendarEvent, FormState};
 
 fn bidi(text: &str) -> String {
@@ -15,7 +15,9 @@ fn bidi(text: &str) -> String {
     }
     let bidi_info = BidiInfo::new(text, None);
     match bidi_info.paragraphs.first() {
-        Some(para) => bidi_info.reorder_line(para, para.range.clone()).into_owned(),
+        Some(para) => bidi_info
+            .reorder_line(para, para.range.clone())
+            .into_owned(),
         None => text.to_string(),
     }
 }
@@ -25,11 +27,7 @@ fn bidi(text: &str) -> String {
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    let main = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .areas::<2>(area);
+    let main = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas::<2>(area);
     let [content, status_bar] = main;
 
     let evt_area = render_content(frame, content, app);
@@ -59,7 +57,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 
     match &app.auth_state {
-        AuthState::Listening { .. } => render_auth_dialog(frame, "Waiting for authorization...", app),
+        AuthState::Listening { .. } => {
+            render_auth_dialog(frame, "Waiting for authorization...", app)
+        }
         AuthState::Message(msg) => render_auth_dialog(frame, msg, app),
         _ => {}
     }
@@ -71,11 +71,7 @@ fn render_content(frame: &mut Frame, area: Rect, app: &App) -> Rect {
     if app.view_mode == ViewMode::Week {
         return render_week_view(frame, area, app);
     }
-    let panels = Layout::horizontal([
-        Constraint::Length(38),
-        Constraint::Min(1),
-    ])
-    .areas::<2>(area);
+    let panels = Layout::horizontal([Constraint::Length(38), Constraint::Min(1)]).areas::<2>(area);
     let [cal_area, evt_area] = panels;
 
     render_calendar(frame, cal_area, app);
@@ -120,7 +116,9 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         dance = format!(" {} ", frame);
     }
     let used: usize = spans.iter().map(|s| s.content.len()).sum();
-    let pad = area.width.saturating_sub(used as u16 + dance.len() as u16 + time.len() as u16);
+    let pad = area
+        .width
+        .saturating_sub(used as u16 + dance.len() as u16 + time.len() as u16);
     if pad > 0 {
         spans.push(Span::raw(" ".repeat(pad as usize)));
     }
@@ -152,7 +150,9 @@ fn status_text(app: &App) -> String {
             }
         }
         Mode::JumpToDate(_, _) => "[Enter] Jump  [Esc] Cancel".into(),
-        Mode::Creating(_) | Mode::Editing(_) => "[Tab] Next  [Enter] Save  [Esc] Cancel".into(),
+        Mode::Creating(_) | Mode::Editing(_) => {
+            "[Tab] Next  [C-e] Edit description  [Enter] Save  [Esc] Cancel".into()
+        }
         Mode::Deleting => "[Enter] Confirm  [Esc] Cancel".into(),
         Mode::ConfirmingQuit => "[y] Yes  [n] No  [Enter] Yes  [Esc] No".into(),
         Mode::Help => "[Esc] Close".into(),
@@ -203,7 +203,10 @@ fn render_calendar(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(Line::from(dow_spans));
 
     // Build weeks — always 6 rows for consistent height
-    let prev_last = month_last_day(year - if month == 1 { 1 } else { 0 }, if month == 1 { 12 } else { month - 1 });
+    let prev_last = month_last_day(
+        year - if month == 1 { 1 } else { 0 },
+        if month == 1 { 12 } else { month - 1 },
+    );
     let mut day: u32 = 1;
     let mut next_day: u32 = 1;
     let dim = Style::new().fg(Color::DarkGray);
@@ -289,9 +292,15 @@ fn day_style(date: NaiveDate, app: &App) -> Style {
 
 fn month_last_day(year: i32, month: u32) -> NaiveDate {
     if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap().pred_opt().unwrap()
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)
+            .unwrap()
+            .pred_opt()
+            .unwrap()
     } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap().pred_opt().unwrap()
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+            .unwrap()
+            .pred_opt()
+            .unwrap()
     }
 }
 
@@ -354,7 +363,10 @@ fn render_event_list(frame: &mut Frame, area: Rect, app: &App) {
             " Loading…"
         };
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(msg, app.theme.dim.add_modifier(Modifier::ITALIC)))),
+            Paragraph::new(Line::from(Span::styled(
+                msg,
+                app.theme.dim.add_modifier(Modifier::ITALIC),
+            ))),
             inner,
         );
         return;
@@ -373,7 +385,10 @@ fn render_event_list(frame: &mut Frame, area: Rect, app: &App) {
 
             let is_selected = i == app.event_focus;
             let style = if is_selected && is_focused {
-                Style::new().bg(app.theme.selected_bg).fg(Color::White).add_modifier(Modifier::BOLD)
+                Style::new()
+                    .bg(app.theme.selected_bg)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
             } else if is_selected {
                 Style::new().bg(Color::DarkGray)
             } else {
@@ -419,21 +434,28 @@ fn render_event_list(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         // Only show visible items
         let scroll = app.event_focus.saturating_sub((available - 1) as usize / 2);
-        let visible: Vec<ListItem> = items.into_iter().skip(scroll).take(available as usize).collect();
+        let visible: Vec<ListItem> = items
+            .into_iter()
+            .skip(scroll)
+            .take(available as usize)
+            .collect();
         let list = List::new(visible).highlight_symbol("");
         frame.render_widget(list, inner);
 
         // Scroll indicator
         if scroll + (available as usize) < app.events.len() {
             let indicator = Paragraph::new(Line::from(Span::styled(
-                format!(" ↓ {} more ", app.events.len() - scroll - available as usize),
+                format!(
+                    " ↓ {} more ",
+                    app.events.len() - scroll - available as usize
+                ),
                 app.theme.dim,
             )));
-            let indicator_area = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+            let indicator_area =
+                Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
             frame.render_widget(indicator, indicator_area);
         }
     }
-
 }
 
 // ── Search bar ─────────────────────────────────────────────────
@@ -454,7 +476,10 @@ fn render_search_bar(frame: &mut Frame, app: &App, content: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Search: ", Style::new().fg(Color::White)),
-            Span::styled(query_visual, Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                query_visual,
+                Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("▌", Style::new().fg(Color::White)),
         ]))
         .style(Style::new().bg(app.theme.selected_bg)),
@@ -484,16 +509,29 @@ fn render_jump_date(frame: &mut Frame, value: &str, cursor: usize, app: &App) {
     let after = &value[byte_cursor..];
 
     let label = Span::styled(" Date: ", app.theme.accent_bold);
-    let cursor_ch = after.chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".into());
+    let cursor_ch = after
+        .chars()
+        .next()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| " ".into());
     let after_rest = after.chars().skip(1).collect::<String>();
 
     let mut spans = vec![label];
     if !before.is_empty() {
-        spans.push(Span::styled(bidi(before), Style::new().bg(Color::DarkGray).fg(Color::White)));
+        spans.push(Span::styled(
+            bidi(before),
+            Style::new().bg(Color::DarkGray).fg(Color::White),
+        ));
     }
-    spans.push(Span::styled(cursor_ch, Style::new().bg(app.theme.active_border).fg(Color::Black)));
+    spans.push(Span::styled(
+        cursor_ch,
+        Style::new().bg(app.theme.active_border).fg(Color::Black),
+    ));
     if !after_rest.is_empty() {
-        spans.push(Span::styled(bidi(&after_rest), Style::new().bg(Color::DarkGray).fg(Color::White)));
+        spans.push(Span::styled(
+            bidi(&after_rest),
+            Style::new().bg(Color::DarkGray).fg(Color::White),
+        ));
     }
     spans.push(Span::styled(
         "  (e.g. 2026-05-31, May 31, tomorrow, +3)",
@@ -526,7 +564,10 @@ fn render_event_detail(frame: &mut Frame, event: &CalendarEvent, app: &App) {
         Span::raw(bidi(&event.summary)),
     ]));
     if let Some(start) = event.start {
-        let end_str = event.end.map(|e| e.format(" %H:%M").to_string()).unwrap_or_default();
+        let end_str = event
+            .end
+            .map(|e| e.format(" %H:%M").to_string())
+            .unwrap_or_default();
         let time_str = bidi(&format!("{} —{}", start.format("%a %b %d, %H:%M"), end_str));
         lines.push(Line::from(vec![
             Span::styled(" Time:  ", Style::new().bold().fg(Color::Cyan)),
@@ -534,17 +575,21 @@ fn render_event_detail(frame: &mut Frame, event: &CalendarEvent, app: &App) {
         ]));
     }
     if let Some(ref desc) = event.description
-        && !desc.is_empty() {
-            lines.push(Line::from(Span::styled(" Description: ", Style::new().bold().fg(Color::Cyan))));
-            for line in desc.lines() {
-                lines.push(Line::from(vec![
-                    Span::raw("   "),
-                    Span::raw(bidi(line)),
-                ]));
-            }
+        && !desc.is_empty()
+    {
+        lines.push(Line::from(Span::styled(
+            " Description: ",
+            Style::new().bold().fg(Color::Cyan),
+        )));
+        for line in desc.lines() {
+            lines.push(Line::from(vec![Span::raw("   "), Span::raw(bidi(line))]));
         }
+    }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" [Esc] Close", Style::new().fg(Color::DarkGray))));
+    lines.push(Line::from(Span::styled(
+        " [Esc] Close",
+        Style::new().fg(Color::DarkGray),
+    )));
 
     let paragraph = Paragraph::new(Text::from(lines));
     frame.render_widget(paragraph, inner);
@@ -573,7 +618,10 @@ fn render_event_list_popup(frame: &mut Frame, events: &[CalendarEvent], cursor: 
         .enumerate()
         .map(|(i, event)| {
             let is_selected = i == cursor;
-            let time = event.start.map(|s| s.format(" %H:%M").to_string()).unwrap_or_default();
+            let time = event
+                .start
+                .map(|s| s.format(" %H:%M").to_string())
+                .unwrap_or_default();
             let title = bidi(&event.summary);
             let label = format!("{}{}", time, title);
             let style = if is_selected {
@@ -591,7 +639,6 @@ fn render_event_list_popup(frame: &mut Frame, events: &[CalendarEvent], cursor: 
     let list = List::new(items);
     frame.render_widget(list, inner);
 }
-
 
 fn week_start(date: NaiveDate, first_day_of_week: u8) -> NaiveDate {
     let dow = if first_day_of_week == 0 {
@@ -631,7 +678,8 @@ fn render_week_view(frame: &mut Frame, area: Rect, app: &App) -> Rect {
         let is_selected = date == app.selected_date;
         let is_today = date == today;
 
-        let day_events: Vec<&CalendarEvent> = app.month_events
+        let day_events: Vec<&CalendarEvent> = app
+            .month_events
             .iter()
             .filter(|e| e.start.is_some_and(|s| s.date() == date))
             .collect();
@@ -679,7 +727,10 @@ fn render_week_day(
         )));
     } else {
         for event in events.iter().take(4) {
-            let time = event.start.map(|s| s.format(" %H:%M").to_string()).unwrap_or_default();
+            let time = event
+                .start
+                .map(|s| s.format(" %H:%M").to_string())
+                .unwrap_or_default();
             let title = bidi(&event.summary);
             let label = format!("{}{}", time, title);
             let truncated: String = label
@@ -696,7 +747,11 @@ fn render_week_day(
         }
     }
 
-    let bg = if is_selected { app.theme.selected_bg } else { Color::Black };
+    let bg = if is_selected {
+        app.theme.selected_bg
+    } else {
+        Color::Black
+    };
     frame.render_widget(
         Paragraph::new(Text::from(lines)).style(Style::new().bg(bg)),
         area,
@@ -745,7 +800,11 @@ fn render_form(frame: &mut Frame, title: &str, form: &FormState, app: &App) {
                     Style::new().bg(Color::DarkGray).fg(Color::White),
                 ));
             }
-            let cursor_ch = after.chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".into());
+            let cursor_ch = after
+                .chars()
+                .next()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| " ".into());
             spans.push(Span::styled(
                 cursor_ch,
                 Style::new().bg(app.theme.active_border).fg(Color::Black),
@@ -797,11 +856,16 @@ fn render_delete_dialog(frame: &mut Frame, app: &App) {
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let name = app.selected_event().map(|e| e.summary.as_str()).unwrap_or("this event");
+    let name = app
+        .selected_event()
+        .map(|e| e.summary.as_str())
+        .unwrap_or("this event");
     let lines = vec![
         Line::from(Span::styled(
             format!(" Delete \"{}\"?", bidi(name)),
-            Style::new().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
@@ -837,7 +901,9 @@ fn render_confirm_quit(frame: &mut Frame, app: &App) {
     let lines = vec![
         Line::from(Span::styled(
             " Really quit? ",
-            Style::new().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
@@ -876,24 +942,45 @@ fn render_setup(frame: &mut Frame, app: &App) {
         .unwrap_or_else(|| "~/.config/calendar-cli".to_string());
 
     let text = Text::from(vec![
-        Line::from(Span::styled("  One-time setup:", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "  One-time setup:",
+            Style::new().bold().fg(Color::Cyan),
+        )),
         Line::from(Span::raw("  1. Go to https://console.cloud.google.com")),
         Line::from(Span::raw("  2. Enable the Google Calendar API")),
-        Line::from(Span::raw("  3. Create OAuth 2.0 credentials (Desktop app type)")),
+        Line::from(Span::raw(
+            "  3. Create OAuth 2.0 credentials (Desktop app type)",
+        )),
         Line::from(Span::raw("")),
-        Line::from(Span::styled("  4. Save them as credentials.json in:", Style::new().bold().fg(Color::Cyan))),
-        Line::from(Span::styled(format!("     {config_dir}"), Style::new().fg(Color::Yellow))),
+        Line::from(Span::styled(
+            "  4. Save them as credentials.json in:",
+            Style::new().bold().fg(Color::Cyan),
+        )),
+        Line::from(Span::styled(
+            format!("     {config_dir}"),
+            Style::new().fg(Color::Yellow),
+        )),
         Line::from(Span::raw("")),
-        Line::from(Span::styled("  Example file:", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "  Example file:",
+            Style::new().bold().fg(Color::Cyan),
+        )),
         Line::from(Span::raw("  {")),
         Line::from(Span::raw("    \"installed\": {")),
-        Line::from(Span::raw("      \"client_id\": \"xxx.apps.googleusercontent.com\",")),
+        Line::from(Span::raw(
+            "      \"client_id\": \"xxx.apps.googleusercontent.com\",",
+        )),
         Line::from(Span::raw("      \"client_secret\": \"GOCSPX-...\",")),
-        Line::from(Span::raw("      \"redirect_uris\": [\"http://localhost:8080\"]")),
+        Line::from(Span::raw(
+            "      \"redirect_uris\": [\"http://localhost:8080\"]",
+        )),
         Line::from(Span::raw("    }")),
         Line::from(Span::raw("  }")),
         Line::from(Span::raw("")),
-        Line::from(Span::styled("  Then: Account > Sign In to Google.        [Esc] Close", Style::new().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            "  Then: Account > Sign In to Google.        [Esc] Close",
+            Style::new().fg(Color::DarkGray),
+        )),
     ]);
 
     let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
@@ -916,7 +1003,10 @@ fn render_help(frame: &mut Frame, app: &App) {
     frame.render_widget(block, popup);
 
     let help_text = Text::from(vec![
-        Line::from(Span::styled("  Navigation", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "  Navigation",
+            Style::new().bold().fg(Color::Cyan),
+        )),
         Line::from(Span::raw("  Arrows    Move between days / menu items")),
         Line::from(Span::raw("  [/]       Previous / Next month")),
         Line::from(Span::raw("  w         Toggle Week / Month view")),
@@ -924,7 +1014,10 @@ fn render_help(frame: &mut Frame, app: &App) {
         Line::from(Span::raw("  Enter     Context menu")),
         Line::from(Span::raw("  Esc       Quit / Close")),
         Line::from(Span::raw("")),
-        Line::from(Span::styled("  Actions", Style::new().bold().fg(Color::Cyan))),
+        Line::from(Span::styled(
+            "  Actions",
+            Style::new().bold().fg(Color::Cyan),
+        )),
         Line::from(Span::raw("  e     Edit event        d   Delete event")),
         Line::from(Span::raw("  ?     Help              s   Settings")),
         Line::from(Span::raw("  t     Go to Today       j   Jump to Date")),
@@ -1015,7 +1108,9 @@ fn render_settings(frame: &mut Frame, app: &App) {
     let dim = Style::new().fg(Color::DarkGray);
     let action = Style::new().fg(Color::Green).add_modifier(Modifier::BOLD);
     let green = Style::new().fg(Color::Green);
-    let focus_bg = Style::new().bg(app.theme.selected_bg).add_modifier(Modifier::BOLD);
+    let focus_bg = Style::new()
+        .bg(app.theme.selected_bg)
+        .add_modifier(Modifier::BOLD);
     let creds_exist = app.config_credentials_path.exists();
     let token_exists = app.config_token_path.exists();
     let cal_registered = crate::app::App::is_cal_registered();
@@ -1027,33 +1122,61 @@ fn render_settings(frame: &mut Frame, app: &App) {
     lines.push(Line::from(Span::styled(" Connections", header)));
 
     let local_focused = app.settings_focus == 0;
-    lines.push(Line::from(vec![
-        Span::styled("  ✓ ", green),
-        Span::styled("Local Storage", val),
-    ]).style(if local_focused { focus_bg } else { Style::new() }));
+    lines.push(
+        Line::from(vec![
+            Span::styled("  ✓ ", green),
+            Span::styled("Local Storage", val),
+        ])
+        .style(if local_focused {
+            focus_bg
+        } else {
+            Style::new()
+        }),
+    );
 
     let google_focused = app.settings_focus == 1;
     if token_exists {
-        lines.push(Line::from(vec![
-            Span::styled("  ✓ ", green),
-            Span::styled("Google Calendar", val),
-            Span::raw("  "),
-            Span::styled("(sign out)", action),
-        ]).style(if google_focused { focus_bg } else { Style::new() }));
+        lines.push(
+            Line::from(vec![
+                Span::styled("  ✓ ", green),
+                Span::styled("Google Calendar", val),
+                Span::raw("  "),
+                Span::styled("(sign out)", action),
+            ])
+            .style(if google_focused {
+                focus_bg
+            } else {
+                Style::new()
+            }),
+        );
     } else if creds_exist {
-        lines.push(Line::from(vec![
-            Span::styled("  ○ ", dim),
-            Span::styled("Google Calendar", dim),
-            Span::raw("  "),
-            Span::styled("(sign in)", action),
-        ]).style(if google_focused { focus_bg } else { Style::new() }));
+        lines.push(
+            Line::from(vec![
+                Span::styled("  ○ ", dim),
+                Span::styled("Google Calendar", dim),
+                Span::raw("  "),
+                Span::styled("(sign in)", action),
+            ])
+            .style(if google_focused {
+                focus_bg
+            } else {
+                Style::new()
+            }),
+        );
     } else {
-        lines.push(Line::from(vec![
-            Span::styled("  ○ ", dim),
-            Span::styled("Google Calendar", dim),
-            Span::raw("  "),
-            Span::styled("(no credentials)", dim),
-        ]).style(if google_focused { focus_bg } else { Style::new() }));
+        lines.push(
+            Line::from(vec![
+                Span::styled("  ○ ", dim),
+                Span::styled("Google Calendar", dim),
+                Span::raw("  "),
+                Span::styled("(no credentials)", dim),
+            ])
+            .style(if google_focused {
+                focus_bg
+            } else {
+                Style::new()
+            }),
+        );
     }
 
     lines.push(Line::from(""));
@@ -1062,11 +1185,18 @@ fn render_settings(frame: &mut Frame, app: &App) {
     lines.push(Line::from(Span::styled(" Calendar", header)));
 
     let dow_focused = app.settings_focus == 2;
-    let dow_label = if app.first_day_of_week == 0 { "Monday" } else { "Sunday" };
-    lines.push(Line::from(vec![
-        Span::styled("  Start week on: ", val),
-        Span::styled(dow_label, action),
-    ]).style(if dow_focused { focus_bg } else { Style::new() }));
+    let dow_label = if app.first_day_of_week == 0 {
+        "Monday"
+    } else {
+        "Sunday"
+    };
+    lines.push(
+        Line::from(vec![
+            Span::styled("  Start week on: ", val),
+            Span::styled(dow_label, action),
+        ])
+        .style(if dow_focused { focus_bg } else { Style::new() }),
+    );
 
     lines.push(Line::from(""));
 
@@ -1081,10 +1211,17 @@ fn render_settings(frame: &mut Frame, app: &App) {
         crate::app::ThemeKind::Nord => "Nord",
         crate::app::ThemeKind::Gruvbox => "Gruvbox",
     };
-    lines.push(Line::from(vec![
-        Span::styled("  Theme: ", val),
-        Span::styled(theme_name, action),
-    ]).style(if theme_focused { focus_bg } else { Style::new() }));
+    lines.push(
+        Line::from(vec![
+            Span::styled("  Theme: ", val),
+            Span::styled(theme_name, action),
+        ])
+        .style(if theme_focused {
+            focus_bg
+        } else {
+            Style::new()
+        }),
+    );
 
     let dance_focused = app.settings_focus == 4;
     let dance_name = match app.dance_style {
@@ -1094,10 +1231,17 @@ fn render_settings(frame: &mut Frame, app: &App) {
         crate::app::DanceStyle::Sway => "Sway",
         crate::app::DanceStyle::Shrug => "Shrug",
     };
-    lines.push(Line::from(vec![
-        Span::styled("  Dance: ", val),
-        Span::styled(dance_name, action),
-    ]).style(if dance_focused { focus_bg } else { Style::new() }));
+    lines.push(
+        Line::from(vec![
+            Span::styled("  Dance: ", val),
+            Span::styled(dance_name, action),
+        ])
+        .style(if dance_focused {
+            focus_bg
+        } else {
+            Style::new()
+        }),
+    );
 
     let sub = match app.dance_style {
         crate::app::DanceStyle::None => String::new(),
@@ -1107,7 +1251,10 @@ fn render_settings(frame: &mut Frame, app: &App) {
         }
     };
     if !sub.is_empty() {
-        lines.last_mut().unwrap().push_span(Span::raw(format!("  {}", sub)));
+        lines
+            .last_mut()
+            .unwrap()
+            .push_span(Span::raw(format!("  {}", sub)));
     }
 
     lines.push(Line::from(""));
@@ -1117,36 +1264,43 @@ fn render_settings(frame: &mut Frame, app: &App) {
 
     let cal_focused = app.settings_focus == 5;
     if cal_registered {
-        lines.push(Line::from(vec![
-            Span::styled("  ✓ ", green),
-            Span::styled("cal command", val),
-            Span::raw("  "),
-            Span::styled("(unregister)", action),
-        ]).style(if cal_focused { focus_bg } else { Style::new() }));
+        lines.push(
+            Line::from(vec![
+                Span::styled("  ✓ ", green),
+                Span::styled("cal command", val),
+                Span::raw("  "),
+                Span::styled("(unregister)", action),
+            ])
+            .style(if cal_focused { focus_bg } else { Style::new() }),
+        );
     } else {
-        lines.push(Line::from(vec![
-            Span::styled("  ○ ", dim),
-            Span::styled("cal command", dim),
-            Span::raw("  "),
-            Span::styled("(register)", action),
-        ]).style(if cal_focused { focus_bg } else { Style::new() }));
+        lines.push(
+            Line::from(vec![
+                Span::styled("  ○ ", dim),
+                Span::styled("cal command", dim),
+                Span::raw("  "),
+                Span::styled("(register)", action),
+            ])
+            .style(if cal_focused { focus_bg } else { Style::new() }),
+        );
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("  [\u{2191}/\u{2193}] Navigate  ", Style::new().fg(Color::Green)),
+        Span::styled(
+            "  [\u{2191}/\u{2193}] Navigate  ",
+            Style::new().fg(Color::Green),
+        ),
         Span::styled("[Enter] Toggle  ", Style::new().fg(Color::Green)),
         Span::styled("[Esc] Back", dim),
     ]));
     lines.push(Line::from(""));
     lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!(" calendar-cli v{}", env!("CARGO_PKG_VERSION")),
-            dim.add_modifier(Modifier::ITALIC),
-        ),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        format!(" calendar-cli v{}", env!("CARGO_PKG_VERSION")),
+        dim.add_modifier(Modifier::ITALIC),
+    )]));
 
     frame.render_widget(
         Paragraph::new(Text::from(lines)).style(Style::new().bg(Color::Black)),
@@ -1180,14 +1334,20 @@ fn render_auth_dialog(frame: &mut Frame, message: &str, app: &App) {
             if is_loading {
                 Span::styled(message, Style::new().fg(Color::Cyan))
             } else if message.starts_with('✓') {
-                Span::styled(message, Style::new().fg(Color::Green).add_modifier(Modifier::BOLD))
+                Span::styled(
+                    message,
+                    Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+                )
             } else {
                 Span::styled(message, Style::new().fg(Color::Red))
             },
         ]),
         Line::from(""),
         Line::from(if is_loading {
-            Span::styled("  Your browser should open automatically.", Style::new().fg(Color::DarkGray))
+            Span::styled(
+                "  Your browser should open automatically.",
+                Style::new().fg(Color::DarkGray),
+            )
         } else {
             Span::styled("  [Esc] Close", Style::new().fg(Color::DarkGray))
         }),

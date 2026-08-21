@@ -64,12 +64,10 @@ impl CalendarBackend for LocalCalendar {
             .store
             .events
             .iter()
-            .filter(|e| {
-                match (e.start, e.end) {
-                    (Some(s), Some(e)) => s.date() <= end && e.date() >= start,
-                    (Some(s), None) => s.date() >= start && s.date() <= end,
-                    (None, _) => false,
-                }
+            .filter(|e| match (e.start, e.end) {
+                (Some(s), Some(e)) => s.date() <= end && e.date() >= start,
+                (Some(s), None) => s.date() >= start && s.date() <= end,
+                (None, _) => false,
             })
             .map(|e| CalendarEvent {
                 id: format!("local-{}", e.id),
