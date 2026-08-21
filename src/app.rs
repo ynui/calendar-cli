@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use ratatui::style::{Color, Modifier, Style};
@@ -250,7 +250,7 @@ pub enum Action {
     None,
     Quit,
     RefreshEvents,
-    EditDescription,
+    EditCredentials,
 }
 
 // ── App ─────────────────────────────────────────────────────────
@@ -332,15 +332,7 @@ impl App {
     where
         B::Error: Send + Sync + std::error::Error + 'static,
     {
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        std::thread::spawn(move || {
-            while let Ok(event) = crossterm::event::read() {
-                if event_tx.send(event).is_err() {
-                    break;
-                }
-            }
-        });
+        let mut input = InputReader::new();
 
         self.refresh_events().await?;
 
@@ -360,7 +352,7 @@ impl App {
             terminal.draw(|f| ui::render(f, self))?;
 
             // Timeout allows the clock in the menu bar to update live
-            let event = tokio::time::timeout(Duration::from_millis(500), event_rx.recv())
+            let event = tokio::time::timeout(Duration::from_millis(500), input.rx.recv())
                 .await
                 .ok()
                 .flatten();
@@ -370,7 +362,11 @@ impl App {
                 match event {
                     Event::Key(key) => match self.handle_key(key).await? {
                         Action::Quit => break,
-                        Action::EditDescription => self.edit_description_in_editor(terminal)?,
+                        Action::EditCredentials => {
+                            input.stop();
+                            self.edit_credentials_in_editor(terminal).await?;
+                            input = InputReader::new();
+                        }
                         Action::None | Action::RefreshEvents => {}
                     },
                     Event::Resize(_, _) => {}
@@ -396,9 +392,7 @@ impl App {
         match &mut self.mode {
             Mode::Normal => self.handle_normal_key(key).await,
             Mode::Creating(form) => {
-                if is_edit_description(key) {
-                    Ok(Action::EditDescription)
-                } else if handle_form_key(key, form) {
+                if handle_form_key(key, form) {
                     self.save_event().await
                 } else if is_cancel(key) {
                     self.mode = Mode::Normal;
@@ -408,9 +402,7 @@ impl App {
                 }
             }
             Mode::Editing(form) => {
-                if is_edit_description(key) {
-                    Ok(Action::EditDescription)
-                } else if handle_form_key(key, form) {
+                if handle_form_key(key, form) {
                     self.update_event().await
                 } else if is_cancel(key) {
                     self.mode = Mode::Normal;
@@ -442,8 +434,10 @@ impl App {
                 Ok(Action::None)
             }
             Mode::Setup => {
-                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
-                    self.mode = Mode::Normal;
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => self.mode = Mode::Normal,
+                    KeyCode::Char('e') | KeyCode::Enter => return Ok(Action::EditCredentials),
+                    _ => {}
                 }
                 Ok(Action::None)
             }
@@ -538,7 +532,7 @@ impl App {
                         self.mode = Mode::Normal;
                     }
                     KeyCode::Down | KeyCode::Tab => {
-                        self.settings_focus = (self.settings_focus + 1).min(5);
+                        self.settings_focus = (self.settings_focus + 1).min(6);
                     }
                     KeyCode::Up | KeyCode::BackTab => {
                         self.settings_focus = self.settings_focus.saturating_sub(1);
@@ -631,6 +625,9 @@ impl App {
                                     }
                                 }
                             }
+                        }
+                        6 => {
+                            return Ok(Action::EditCredentials);
                         }
                         _ => {}
                     },
@@ -1001,9 +998,14 @@ impl App {
         .await
         {
             Ok(a) => a,
-            Err(e) => {
-                self.auth_state =
-                    AuthState::Message(format!("✗ Failed to load credentials: {}", e));
+            Err(_) => {
+                self.auth_state = AuthState::Message(format!(
+                    "✗ Invalid credentials.json in {} — fix the file, then Sign In again",
+                    self.config_credentials_path
+                        .parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
+                ));
                 return;
             }
         };
@@ -1268,6 +1270,8 @@ impl App {
             .backend
             .list_events_range(range_start, range_end)
             .await?;
+        let mut month_events = month_events;
+        month_events.sort_by_key(|e| e.start);
         self.month_events = month_events;
         self.last_loaded_month = Some((self.view_date.year(), self.view_date.month()));
         self.filter_events_for_date(self.selected_date);
@@ -1312,10 +1316,13 @@ impl App {
                     .create_event(&summary, description.as_deref(), start, end)
                     .await
                 {
-                    Ok(_) => {
+                    Ok(created) => {
                         self.status = format!("✓ Created: {}", summary);
                         self.mode = Mode::Normal;
                         self.refresh_events().await?;
+                        if let Some(idx) = self.events.iter().position(|e| e.id == created.id) {
+                            self.event_focus = idx;
+                        }
                         Ok(Action::RefreshEvents)
                     }
                     Err(e) => {
@@ -1506,53 +1513,96 @@ fn is_cancel(key: KeyEvent) -> bool {
     matches!(key.code, KeyCode::Esc)
 }
 
-fn is_edit_description(key: KeyEvent) -> bool {
-    matches!(key.code, KeyCode::Char('e')) && key.modifiers.contains(KeyModifiers::CONTROL)
+// ── External editor (credentials) ───────────────────────────────
+
+const CREDENTIALS_TEMPLATE: &str = r#"{
+  "installed": {
+    "client_id": "PASTE-YOUR-ID.apps.googleusercontent.com",
+    "client_secret": "PASTE-YOUR-SECRET",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "redirect_uris": ["http://localhost:8080"]
+  }
+}
+"#;
+
+/// Reads crossterm events on a background thread. Must be fully stopped
+/// before handing the terminal to a child process (e.g. $EDITOR),
+/// otherwise the thread and the child compete for stdin.
+struct InputReader {
+    rx: tokio::sync::mpsc::UnboundedReceiver<crossterm::event::Event>,
+    handle: std::thread::JoinHandle<()>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-// ── External editor ─────────────────────────────────────────────
+impl InputReader {
+    fn new() -> Self {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_flag = stop.clone();
+        let handle = std::thread::spawn(move || {
+            while !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                if crossterm::event::poll(std::time::Duration::from_millis(100)).unwrap_or(false) {
+                    if let Ok(event) = crossterm::event::read() {
+                        if tx.send(event).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        Self { rx, handle, stop }
+    }
+
+    fn stop(self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = self.handle.join();
+    }
+}
 
 impl App {
-    fn edit_description_in_editor<B: Backend + 'static>(
+    async fn edit_credentials_in_editor<B: Backend + 'static>(
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> Result<()>
     where
         B::Error: Send + Sync + std::error::Error + 'static,
     {
-        let form = match &mut self.mode {
-            Mode::Creating(form) | Mode::Editing(form) => form,
-            _ => return Ok(()),
-        };
-        let Some(desc) = form.fields.iter_mut().find(|f| f.label == "Description") else {
-            return Ok(());
-        };
+        let path = self.config_credentials_path.clone();
 
-        let path =
-            std::env::temp_dir().join(format!("calendar-cli-desc-{}.md", std::process::id()));
-        std::fs::write(&path, &desc.value)?;
-
-        // leave the TUI so the editor gets a normal terminal
+        // leave the TUI so the editor gets an exclusive, normal terminal
         ratatui::restore();
+        if !path.exists() {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&path, CREDENTIALS_TEMPLATE)?;
+        }
         let editor = std::env::var("VISUAL")
             .or_else(|_| std::env::var("EDITOR"))
             .unwrap_or_else(|_| "vi".into());
         let status = std::process::Command::new(&editor).arg(&path).status();
-        if let Ok(out) = std::fs::read_to_string(&path) {
-            desc.value = out.trim_end().to_string();
-            desc.cursor = desc.value.len();
-        }
-        let _ = std::fs::remove_file(&path);
 
         // back to the TUI
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
         terminal.clear()?;
-        self.status = match status {
-            Ok(s) if s.success() => "✓ Description updated".into(),
-            Ok(s) => format!("Editor exited with {}", s.code().unwrap_or(-1)),
-            Err(e) => format!("Failed to launch editor '{editor}': {e}"),
-        };
+
+        match status {
+            Ok(s) if s.success() && path.exists() => {
+                if self.config_token_path.exists() {
+                    self.status = "✓ Credentials saved — use Sign In to re-authenticate".into();
+                } else {
+                    self.start_auth().await;
+                }
+            }
+            Ok(s) => {
+                self.status = format!("Editor exited with {}", s.code().unwrap_or(-1));
+            }
+            Err(e) => {
+                self.status = format!("Failed to launch editor '{editor}': {e}");
+            }
+        }
         Ok(())
     }
 }

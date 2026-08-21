@@ -8,7 +8,7 @@ include!(concat!(env!("OUT_DIR"), "/credentials.rs"));
 
 #[derive(Serialize, Deserialize)]
 pub struct Settings {
-    #[serde(default)]
+    #[serde(default = "default_first_day_of_week")]
     pub first_day_of_week: u8,
     #[serde(default)]
     pub theme: String,
@@ -16,10 +16,14 @@ pub struct Settings {
     pub dance_style: String,
 }
 
+fn default_first_day_of_week() -> u8 {
+    1 // Sunday
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            first_day_of_week: 0,
+            first_day_of_week: default_first_day_of_week(),
             theme: "default".to_string(),
             dance_style: "none".to_string(),
         }

@@ -1090,7 +1090,7 @@ fn render_menu_dropdown(frame: &mut Frame, app: &App) {
 
 fn render_settings(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    let popup = centered_rect(64, 23, area);
+    let popup = centered_rect(64, 26, area);
 
     frame.render_widget(Clear, popup);
 
@@ -1284,6 +1284,26 @@ fn render_settings(frame: &mut Frame, app: &App) {
             .style(if cal_focused { focus_bg } else { Style::new() }),
         );
     }
+
+    lines.push(Line::from(""));
+
+    // ── Credentials ──
+    lines.push(Line::from(Span::styled(" Credentials", header)));
+
+    let creds_focused = app.settings_focus == 6;
+    lines.push(
+        Line::from(vec![
+            Span::styled("  ✎ ", val),
+            Span::styled("Edit credentials.json", val),
+            Span::raw("  "),
+            Span::styled("(open editor)", action),
+        ])
+        .style(if creds_focused {
+            focus_bg
+        } else {
+            Style::new()
+        }),
+    );
 
     lines.push(Line::from(""));
     lines.push(Line::from(""));

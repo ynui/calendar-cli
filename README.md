@@ -16,22 +16,11 @@ A terminal-based calendar app with Google Calendar sync, local event storage, an
 - **`cal` shell command** — optional registration to launch from anywhere
 - **Settings panel** — manage accounts, preferences, and shell integration
 
-## Screenshot
+## Demo
 
-```
-╭── File    Calendar    Account    Help           Wed May 27 2026  14:30:05 ──╮
-│                                                                             │
-│  ┌────────── ◄  May 2026  ► ────────┐  ┌─── Wed, May 27 (3) ──────────────┐ │
-│  │ Mo Tu We Th Fr Sa Su             │  │  09:00 Standup                   │ │
-│  │        1  2  3  4  5             │  │  12:00 Lunch                     │ │
-│  │  6  7  8  9 10 11 12             │  │  15:30 Review                    │ │
-│  │ 13 14 15 16 17 18 19             │  │                                  │ │
-│  │ 20 21 22 23 24 25·26             │  │                                  │ │
-│  │ 27·28 29 30 31                   │  │                                  │ │
-│  └──────────────────────────────────┘  └──────────────────────────────────┘ │
-│  [Arrows] Days  [/] Search  [Enter] Options  [Tab] Focus  [Esc] Quit        │
-╰─────────────────────────────────────────────────────────────────────────────╯
-```
+![calendar-cli demo](assets/demo.gif)
+
+*Recorded with [vhs](https://github.com/charmbracelet/vhs) against a sandboxed local calendar — regenerate with `vhs assets/demo.tape`.*
 
 ## Installation
 
